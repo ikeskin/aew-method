@@ -98,29 +98,29 @@ function supportedNodeRunner(script) {
   if (typeof script !== 'string') return false;
   const normalized=script.trim();
   // A known test runner is required; arbitrary npm commands do not prove tests ran.
-  if (/^(?:node|nodejs)\\s+--test(?:\\s+--test-reporter=tap)?$/.test(normalized)) return true;
-  if (/^(?:jest|vitest\\s+run|mocha)(?:\\s+--(?:runInBand|ci|reporter=(?:tap|default)))?$/.test(normalized)) return true;
+  if (/^(?:node|nodejs)\s+--test(?:\s+--test-reporter=tap)?$/.test(normalized)) return true;
+  if (/^(?:jest|vitest\s+run|mocha)(?:\s+--(?:runInBand|ci|reporter=(?:tap|default)))?$/.test(normalized)) return true;
   return false;
 }
 function nodeTestSummary(output) {
   const text=String(output||'');
-  const total=text.match(/^# tests\\s+(\\d+)\\s*$/m);
-  const pass=text.match(/^# pass\\s+(\\d+)\\s*$/m);
-  const fail=text.match(/^# fail\\s+(\\d+)\\s*$/m);
+  const total=text.match(/^# tests\s+(\d+)\s*$/m);
+  const pass=text.match(/^# pass\s+(\d+)\s*$/m);
+  const fail=text.match(/^# fail\s+(\d+)\s*$/m);
   if (total && pass && fail) return {total:Number(total[1]),passed:Number(pass[1]),failed:Number(fail[1])};
   // Third-party runners with machine-readable totals when present.
-  const jest=text.match(/Tests:\\s*(?:(\\d+) failed,?\\s*)?(\\d+) passed,?\\s*(\\d+) total/);
+  const jest=text.match(/Tests:\s*(?:(\d+) failed,?\s*)?(\d+) passed,?\s*(\d+) total/);
   if (jest) return {total:Number(jest[3]),passed:Number(jest[2]),failed:Number(jest[1]||0)};
-  const vitest=text.match(/Tests\\s+(?:(\\d+) failed\\s*\\|\\s*)?(\\d+) passed\\s*\\((\\d+)\\)/);
+  const vitest=text.match(/Tests\s+(?:(\d+) failed\s*\|\s*)?(\d+) passed\s*\((\d+)\)/);
   if (vitest) return {total:Number(vitest[3]),passed:Number(vitest[2]),failed:Number(vitest[1]||0)};
-  const mocha=text.match(/\\b(\\d+) passing\\b/);
+  const mocha=text.match(/\b(\d+) passing\b/);
   if (mocha) return {total:Number(mocha[1]),passed:Number(mocha[1]),failed:0};
   return null;
 }
 function gitTestChanges(root) {
   try {
-    const files=git(root,'diff-tree','--no-commit-id','--name-only','-r','HEAD').split('\\n').filter(Boolean);
-    return files.filter(path=>/(?:^|\\/)(?:__tests__\\/|tests?\\/)|(?:\\.|_)(?:test|spec)\\.[cm]?[jt]sx?$/.test(path));
+    const files=git(root,'diff-tree','--no-commit-id','--name-only','-r','HEAD').split('\n').filter(Boolean);
+    return files.filter(path=>/(?:^|\/)(?:__tests__\/|tests?\/)|(?:\.|_)(?:test|spec)\.[cm]?[jt]sx?$/.test(path));
   } catch { return []; }
 }
 export function inferCheck(root) {
