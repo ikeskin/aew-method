@@ -76,7 +76,7 @@ function isDotnet(root) {
   return candidates.some(dir=> {
     const p=join(root,dir);
     if (!existsSync(p)) return false;
-    try { return readdirSync(p,{recursive:true}).some(name=>/\\.(?:slnx?|csproj)$/.test(name)); }
+    try { return readdirSync(p,{recursive:true}).some(name=>/\.(?:slnx?|csproj)$/.test(name)); }
     catch { return false; }
   });
 }
@@ -87,16 +87,16 @@ export function inferCheck(root) {
   if (existsSync(join(root,'package.json'))) {
     const pkg=JSON.parse(readFileSync(join(root,'package.json'),'utf8'));
     const script=pkg.scripts?.test;
-    if (!script || /^\\s*(?:echo\\b|true\\b|exit\\s+0\\b|:)\\s*/i.test(script))
+    if (!script || /^\s*(?:echo\b|true\b|exit\s+0\b|:)\s*/i.test(script))
       throw new Error('Missing or trivial npm test script; cannot verify tests');
-    candidates.push(['npm',['test','--','--runInBand']]); // replaced below for framework compatibility
+    candidates.push(['npm',['test']]);
   }
   if (existsSync(join(root,'pyproject.toml')) || existsSync(join(root,'pytest.ini')))
     candidates.push(['python',['-m','pytest']]);
   if (existsSync(join(root,'go.mod'))) candidates.push(['go',['test','./...']]);
   if (!candidates.length) throw new Error('No supported test project detected. Cannot claim verification.');
   // Use all detected ecosystems in polyglot repositories.
-  return candidates.map(([cmd,args])=>[cmd,cmd==='npm'?['test']:args]);
+  return candidates;
 }
 export function check(root,{execute=spawnSync}={}) {
   const before=vcsContext(root);
@@ -138,7 +138,7 @@ export function verifyTrusted(root,{taskId=null,ci=false,github=githubEvidence,e
     if (taskId && !tasks.some(t=>t?.id===taskId)) errors.push('Requested task not found');
     const chosen=taskId?tasks.filter(t=>t?.id===taskId):tasks;
     for (const t of chosen) {
-      if (!t || !/^AEW-\\d+$/.test(t.id||'') ||
+      if (!t || !/^AEW-\d+$/.test(t.id||'') ||
         !Array.isArray(t.criteria) || !t.criteria.length ||
         t.criteria.some(c=>!c?.id||!c.description) ||
         !Array.isArray(t.issues) || t.issues.some(i=>i?.status==='open') ||
