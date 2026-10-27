@@ -22,8 +22,16 @@ export function discover(root) {
   let names = {};
   if (has('package.json')) { try { names = JSON.parse(read(join(root, 'package.json'))); } catch { /* Invalid manifests are reported by the project's build tools. */ } }
   const files = readdirSync(root);
+  const nestedProject = (dir, suffixes) => {
+    const path = join(root, dir);
+    if (!existsSync(path)) return false;
+    try { return readdirSync(path, { withFileTypes: true }).some(entry =>
+      entry.isFile() && suffixes.some(suffix => entry.name.endsWith(suffix)) ||
+      entry.isDirectory() && !['node_modules', 'bin', 'obj', '.git', '.aew'].includes(entry.name) && nestedProject(join(dir, entry.name), suffixes)
+    ); } catch { return false; }
+  };
   const tech = [];
-  if (files.some(f => f.endsWith('.sln') || f.endsWith('.slnx') || f.endsWith('.csproj'))) tech.push('.NET');
+  if (files.some(f => f.endsWith('.sln') || f.endsWith('.slnx') || f.endsWith('.csproj')) || ['src', 'tests'].some(dir => nestedProject(dir, ['.sln', '.slnx', '.csproj']))) tech.push('.NET');
   if (has('package.json')) tech.push('Node.js');
   if (has('pyproject.toml') || has('requirements.txt')) tech.push('Python');
   if (has('go.mod')) tech.push('Go');
@@ -104,7 +112,7 @@ function projectBrief(config) {
   const p = config.project;
   return `# Projectct Brief\n\n- **Projectct type:** ${config.projectType}\n- **Purpose:** ${p.purpose || 'To be clarified before implementation'}\n- **Application:** ${p.application || 'Undecided'}\n- **Technology preference:** ${p.technology || 'Undecided'}\n- **Architecture:** ${p.architecture || 'Prefer the simplest suitable design; validate against actual requirements'}
 - **Projectct profile:** .aew/profiles/project/${applications.includes(p.application) ? p.application : 'other'}.md
-- **Technology profile:** .aew/profiles/technology/${technologyProfiles.includes(p.technology) ? p.technology : 'generic'}.md\n\n## Engineering guidance\n\n- Do not scaffold an application without an approved plan.\n- Ask about missing domain rules and acceptance criteria before implementing features.\n- Avoid speculative abstractions and premature infrastructure.\n- Deployment choices are deferred until deployment requirements exist.\n`;
+- **Technology profile:** .aew/profiles/technology/${technologyProfiles.includes(p.technology) ? p.technology : 'generic'}.md\n\n## Engineering guidance\n\n- Establish a minimal plan before scaffolding. Ask for approval only for unresolved high-impact decisions or operations requiring explicit authorization.\n- Ask about missing domain rules and acceptance criteria before implementing features.\n- Avoid speculative abstractions and premature infrastructure.\n- Deployment choices are deferred until deployment requirements exist.\n`;
 }
 
 export function analyze(root) {
@@ -144,7 +152,11 @@ export function doctor(root) {
       }
     }
   }
-  return { ok: missing.length === 0, missing, config };
+  const diagnostics = [];
+  if (missing.length) diagnostics.push('Installation incomplete: run aew init to add missing files without overwriting existing files.');
+  if (config && discover(root).tech.some(t => !config.detected?.includes(t))) diagnostics.push('Detected technologies differ from saved configuration; run aew analyze and review .aew/config.json.');
+  if (config?.projectType === 'new' && !discover(root).empty) diagnostics.push('Project was initialized as new but now contains source files; projectType records the original setup choice.');
+  return { ok: missing.length === 0, missing, config, diagnostics };
 }
 
 const projectFile = (root, file) => join(root, '.aew', file);
@@ -181,6 +193,7 @@ export function verify(root, taskId = null) {
   if (data?.schemaVersion !== 1 || !Array.isArray(data.tasks)) return { ok: false, tasks: [], errors: ['Invalid gates.json schema'] };
   const selected = taskId ? data.tasks.filter(t => t.id === taskId) : data.tasks;
   if (taskId && selected.length === 0) errors.push(`Task ${taskId} not found`);
+  if (!taskId && selected.length === 0) errors.push('No tasks available for verification');
   const ids = new Set();
   const tasks = selected.map(t => {
     const reasons = [];
@@ -251,7 +264,7 @@ async function interview(info, defaults) {
 export async function run(args, root = process.cwd()) {
   const [command = 'help', ...rest] = args;
   if (command === 'help' || args.includes('--help')) {
-    console.log('AEW Method v0.5.6\n  aew init [--yes] [--dry-run] [--adapters codex,claude,gemini]\n  aew analyze [--json]\n  aew inspect\n  aew doctor [--json]\n  aew status\n  aew tasks\n  aew handoffs\n  aew issues\n  aew verify [--json] [--task AEW-001]\n  aew config show\n  aew config set config.output.verbosity concise\n  aew config set stack.technology .NET\n  aew configure'); return;
+    console.log('AEW Method v0.5.7\n  aew init [--yes] [--dry-run] [--adapters codex,claude,gemini]\n  aew analyze [--json]\n  aew inspect\n  aew doctor [--json]\n  aew status\n  aew tasks\n  aew handoffs\n  aew issues\n  aew verify [--json] [--task AEW-001]\n  aew config show\n  aew config set config.output.verbosity concise\n  aew config set stack.technology .NET\n  aew configure'); return;
   }
   if (command === 'verify') { const result = verify(root, option(rest, '--task', null)); if (rest.includes('--json')) console.log(JSON.stringify(result, null, 2)); else { console.log(result.ok ? '✓ AEW acceptance and security gates passed' : '✗ AEW acceptance/security gates blocked'); for (const item of result.tasks) console.log(`  ${item.id}: ${item.ok ? 'PASS' : 'BLOCKED'}${item.reasons.length ? ' — ' + item.reasons.join('; ') : ''}`); for (const error of result.errors) console.log(`  ERROR: ${error}`); } if (!result.ok) process.exitCode = 1; return; }
   if (command === 'issues') { console.log(read(projectFile(root, 'ISSUES.md'))); return; }
