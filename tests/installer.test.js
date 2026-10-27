@@ -406,16 +406,16 @@ test('optional GitHub CI reports risk without requiring a second human reviewer'
 
 test('aew check uses a real subprocess interface and only clean commit yields LOCAL_PASS', () => sandbox(root => {
   install(root);
-  writeFileSync(join(root,'package.json'),JSON.stringify({scripts:{test:'node --version'}}));
+  writeFileSync(join(root,'package.json'),JSON.stringify({scripts:{test:'node --test'}}));
   committed(root);
   let invoked;
-  const result=localCheck(root,{execute:(cmd,args,options)=>{invoked={cmd,args,options};return {status:0};}});
+  const result=localCheck(root,{execute:(cmd,args,options)=>{invoked={cmd,args,options};return {status:0,stdout:`TAP version 13\n1..1\n# tests 1\n# pass 1\n# fail 0\n# skipped 0\n`};}});
   assert.equal(result.result,'LOCAL_PASS');
   assert.equal(invoked.cmd,'npm');
   assert.deepEqual(invoked.args,['test']);
   assert.equal(invoked.options.shell,false);
   writeFileSync(join(root,'scratch.tmp'),'dirty');
-  const dirty=localCheck(root,{execute:()=>({status:0})});
+  const dirty=localCheck(root,{execute:()=>({status:0,stdout:`TAP version 13\n1..1\n# tests 1\n# pass 1\n# fail 0\n# skipped 0\n`})});
   assert.equal(dirty.result,'LOCAL_PASS');
   assert.equal(dirty.vcs.clean,false);
   assert.equal(dirty.advisoryOnly,true);
@@ -435,7 +435,7 @@ test('provider-neutral policy does not require a Git remote or any VCS', () => s
   install(root);
   writeFileSync(join(root,'package.json'),JSON.stringify({scripts:{test:'node --test'}}));
   const commands=[];
-  const result=localCheck(root,{execute:(cmd,args)=>{commands.push([cmd,...args]);return {status:0};}});
+  const result=localCheck(root,{execute:(cmd,args)=>{commands.push([cmd,...args]);return {status:0,stdout:`TAP version 13\n1..1\n# tests 1\n# pass 1\n# fail 0\n# skipped 0\n`};}});
   assert.equal(result.result,'LOCAL_PASS');
   assert.equal(result.vcs.type,'none');
   assert.equal(result.vcs.revision,null);
@@ -444,16 +444,16 @@ test('provider-neutral policy does not require a Git remote or any VCS', () => s
 test('agent cannot obtain LOCAL_PASS from a trivial npm test script', () => sandbox(root => {
   install(root);
   writeFileSync(join(root,'package.json'),JSON.stringify({scripts:{test:'echo ok'}}));
-  assert.throws(()=>localCheck(root,{execute:()=>({status:0})}),/Trivial npm test script/i);
+  assert.throws(()=>localCheck(root,{execute:()=>({status:0,stdout:`TAP version 13\n1..1\n# tests 1\n# pass 1\n# fail 0\n# skipped 0\n`})}),/Trivial npm test script/i);
 }));
 test('AEW runs checks without trusting task self-approval', () => sandbox(root => {
   install(root);
   writeFileSync(join(root,'package.json'),JSON.stringify({scripts:{test:'node --test'}}));
   const task={schemaVersion:2,id:'AEW-001',status:'done',criteria:[{id:'AC-1',description:'Works'}],issues:[],qa:{verdict:'accepted',evidence:'self-approved'}};
   writeFileSync(join(root,'.aew/gates.json'),JSON.stringify({schemaVersion:2,tasks:[task]}));
-  const failed=verifyTrusted(root,{execute:()=>({status:1})});
+  const failed=verifyTrusted(root,{execute:()=>({status:1,stdout:'failed'})});
   assert.equal(failed.ok,false);
-  const passed=verifyTrusted(root,{execute:()=>({status:0})});
+  const passed=verifyTrusted(root,{execute:()=>({status:0,stdout:`TAP version 13\n1..1\n# tests 1\n# pass 1\n# fail 0\n# skipped 0\n`})});
   assert.equal(passed.ok,true);
   assert.equal(passed.level,'LOCAL_PASS');
   assert.equal(passed.independentApproval,false);
@@ -488,7 +488,7 @@ test('timeout is configurable and generated test files produce explicit warnings
   committed(root);
   const outcome=localCheck(root,{timeoutMs:360000,execute:()=>{
     writeFileSync(join(root,'coverage.tmp'),'generated');
-    return {status:0};
+    return {status:0,stdout:`TAP version 13\n1..1\n# tests 1\n# pass 1\n# fail 0\n# skipped 0\n`};
   }});
   assert.equal(outcome.result,'LOCAL_PASS');
   assert.equal(outcome.cleanCommitEvidence,false);
