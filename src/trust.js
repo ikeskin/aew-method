@@ -4,9 +4,11 @@ import { join } from 'node:path';
 
 const levels = ['UNVERIFIED', 'LOCAL_PASS', 'CI_PASS', 'REVIEWED'];
 const criticalMatchers = [
-  /^\.github\/(?:workflows\/|CODEOWNERS$)/i,
+  /^\.github\/(?:workflows\/|actions\/|CODEOWNERS$)/i,
   /(?:^|\/)CODEOWNERS$/i,
   /^\.aew\//i,
+  /^src\/(?:trust|cli)\.js$/i,
+  /(?:^|\/)(?:global\.json|NuGet\.Config|pytest\.ini|tox\.ini|jest\.config\.[^/]+|vitest\.config\.[^/]+)$/i,
   /(?:^|\/)(?:auth|authentication|authorization|security|payments?|migrations)(?:\/|$)/i,
   /(?:^|\/)(?:package(?:-lock)?\.json|pnpm-lock\.yaml|yarn\.lock|go\.(?:mod|sum)|pyproject\.toml|requirements(?:-[^/]*)?\.txt|Cargo\.(?:toml|lock))$/i,
   /\.csproj$/i,
@@ -106,9 +108,12 @@ export function githubEvidence(root, sha, policy, api = gh) {
   if (!policy.checkNames.every(name => matches.some(check => check.name === name))) throw new Error('Trusted CI check not successful for HEAD');
   // A self-modified workflow requires a separate human approval, not just green CI.
   if (risk.risk === 'normal') return {level:'CI_PASS',risk,pr:pr.number};
+  const commit = flat(api(root, `repos/${repo}/commits/${sha}`))[0];
+  const commitAuthor = commit?.author?.login;
+  if (!commitAuthor) throw new Error('Cannot verify GitHub identity of commit author');
   const reviews = flat(api(root, `repos/${repo}/pulls/${pr.number}/reviews?per_page=100`));
   const valid = reviews.filter(r => r.state === 'APPROVED' && r.commit_id === sha &&
-    r.user?.type === 'User' && r.user.login !== pr.user?.login &&
+    r.user?.type === 'User' && r.user.login !== pr.user?.login && r.user.login !== commitAuthor &&
     !/\[bot\]$/i.test(r.user.login || ''));
   const approvals = new Map();
   for (const r of reviews) if (r.user?.login) approvals.set(r.user.login, r);
