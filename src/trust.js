@@ -158,7 +158,7 @@ export function check(root,{execute=spawnSync,timeoutMs=180000}={}) {
     const passed=out.status===0 && !out.error && validCount;
     results.push({command:[command,...args],exitCode:out.status,signal:out.signal||null,
       error:out.error?.message||null,timedOut,testCounts:summary,
-      passed,reason:command==='npm' && !validCount?'No positive test-runner count verified (empty, skipped or unrecognized output)':null});
+      passed,reason:command==='npm' && !validCount?'No positive test-runner count verified (empty, skipped or unrecognized output); output tail: '+output.slice(-450).replaceAll('\\n',' | '):null});
   }
   const after=vcsContext(root);
   const revisionStable=before.type===after.type && before.revision===after.revision;
