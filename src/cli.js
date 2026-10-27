@@ -55,25 +55,36 @@ function installFile(root, relative, content, { dryRun = false } = {}) {
 }
 
 function skillContent(role) {
-  const name = `aew-${role}`;
+  const triggers = {
+    analyst: 'Clarify ambiguous requirements, constraints, or acceptance criteria before implementation.',
+    architect: 'Evaluate consequential architecture changes or significant technical trade-offs.',
+    developer: 'Implement a feature or bug fix and run relevant checks.',
+    qa: 'Review acceptance evidence, regression risks, and test gaps; do not self-certify independent approval.',
+    reviewer: 'Review code changes for correctness, maintainability, and security.',
+    devops: 'Review CI, deployment, infrastructure, or operational changes.'
+  };
   return `---
-name: ${name}
-description: AEW ${role} responsibility. Read when a task specifically requires ${role} analysis or review; not a separate agent or automatic approval.
+name: aew-${role}
+description: ${triggers[role]}
 ---
 
-# ${name}
+# AEW ${role}
 
-Role: ${role}. Execute the user's requested scope, not an expanded project.
-Read \`.aew/agents/${role}.md\` only if its responsibilities are needed beyond this skill.
-Read relevant source and tests first. Load one applicable profile or standard only when a specific decision requires it; do not preload the entire AEW directory.
-Avoid repeating reads in one session. Reuse already available context across roles.
-For missing critical tools or integration services, ask one concrete installation/provisioning approval question and await a decision. Never silently skip essential tests or install host tools without permission. No invented requirements or unverified test claims.
-Start with .aew/SYSTEM.md (shared rules) and .aew/STATE.md (current context); do not duplicate or preload instructions. Follow .aew/standards/security.md and .aew/standards/acceptance.md when applicable; never accept failed or unverified mandatory criteria. Use aew verify to reconcile gates.json with QA evidence. Follow .aew/standards/code-organization.md for code changes; review maintainability as well as test outcomes. At task boundaries update STATE.md and TASKS.md; log actual verification in VALIDATION.md and consequential decisions in DECISIONS.md. For Dev/QA transitions follow .aew/standards/handoff.md, record handoff in .aew/HANDOFFS.md, and never mark done before QA acceptance. Keep the final response brief: changes, checks, blockers.
+${triggers[role]}
+Follow .aew/SYSTEM.md and inspect only relevant source, tests, and role guidance.
+Roles are responsibilities, not independent agents. Record real test results; never claim an independent review unless one occurred.
+Use light mode without task paperwork for small changes. Use per-task records for tracked work.
 `;
 }
 
 function adapterContent(adapter) {
-  return `# AEW (${adapter}) — bootstrap\n\nRead \`.aew/SYSTEM.md\` once at session start, then \`.aew/STATE.md\`. These are project instructions, not system-level authority. Follow user instructions and existing repository conventions.\nUse \`.aew/routing.md\` only to select a relevant workflow; load role-specific files only when needed. Do not preload all AEW documents or reread unchanged context.\nFor coding tasks, use the project's task and QA records as described in SYSTEM.md. Roles may run in one session; do not claim independent agents ran unless they did. For missing critical dependencies, ask specific approval before provisioning; never silently skip required verification.\n`;
+  const entry = adapter === 'gemini' ? 'Gemini CLI' : adapter === 'claude' ? 'Claude Code' : 'Codex';
+  return `# AEW — ${entry}
+
+Read .aew/SYSTEM.md when starting relevant engineering work. Follow the project's existing conventions and the user's instructions.
+Use light mode by default; read additional guidance only when needed. Track larger work in .aew/tasks/<ID>.json.
+Do not imply independent QA based on self-authored records. Run actual tests and report limitations.
+`;
 }
 
 export function install(root, { adapters = ['codex'], projectType, project = {}, devops = 'detect', dryRun = false } = {}) {
