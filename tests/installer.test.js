@@ -4,6 +4,8 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import * as analysisModule from '../src/cli.js';
+import { classifyRisk, githubEvidence, verifyTrusted, inferCheck, check as localCheck } from '../src/trust.js';
+import { execFileSync } from 'node:child_process';
 const { discover, install, doctor } = analysisModule;
 
 const sandbox = fn => { const dir = mkdtempSync(join(tmpdir(), 'aew-test-')); try { return fn(dir); } finally { rmSync(dir, { recursive: true, force: true }); } };
@@ -174,7 +176,7 @@ test('v0.5.4 installs evidence-based handoff and QA acceptance rules', () => san
   assert.match(handoff, /verification-blocked/);
   assert.match(handoff, /Only after QA `accepted`/);
   assert.match(developer, /HANDOFFS.md/);
-  assert.match(qa, /independently inspect/);
+  assert.match(qa, /only claim independent review/);
   assert.ok(existsSync(join(root, '.aew/HANDOFFS.md')));
   assert.equal(doctor(root).ok, true);
 }));
@@ -198,7 +200,7 @@ test('verify blocks missing acceptance evidence and QA approval', () => sandbox(
   writeFileSync(join(root, '.aew/gates.json'), JSON.stringify({schemaVersion:1,tasks:[{id:'AEW-001',status:'done',criteria:[{id:'AC-1',description:'Works',status:'passed'}],issues:[],qa:{verdict:'accepted',evidence:'HANDOFFS.md'}}]}));
   const result = analysisModule.verify(root, 'AEW-001');
   assert.equal(result.ok, false);
-  assert.match(result.tasks[0].reasons.join(' '), /not verified/);
+  assert.match(result.errors.join(' '), /Legacy gates schema v1/);
 }));
 
 test('verify blocks open high security issue even if flagged nonblocking', () => sandbox(root => {
@@ -207,11 +209,11 @@ test('verify blocks open high security issue even if flagged nonblocking', () =>
   assert.equal(analysisModule.verify(root).ok, false);
 }));
 
-test('verify passes fully evidenced task and fails unresolved rework', () => sandbox(root => {
+test('verify rejects self-accepted legacy v1 tasks regardless of apparent QA success', () => sandbox(root => {
   install(root);
   const task = {id:'AEW-001',status:'done',criteria:[{id:'AC-1',description:'Works',status:'passed',evidence:'VALIDATION.md'}],issues:[{id:'ISSUE-1',severity:'medium',status:'resolved',evidence:'VALIDATION.md'}],qa:{verdict:'accepted',evidence:'HANDOFFS.md'}};
   writeFileSync(join(root, '.aew/gates.json'), JSON.stringify({schemaVersion:1,tasks:[task]}));
-  assert.equal(analysisModule.verify(root).ok, true);
+  assert.equal(analysisModule.verify(root).ok, false);
   task.status = 'rework';
   writeFileSync(join(root, '.aew/gates.json'), JSON.stringify({schemaVersion:1,tasks:[task]}));
   assert.equal(analysisModule.verify(root).ok, false);
@@ -235,7 +237,7 @@ test('empty verification fails rather than reporting a false PASS', () => sandbo
   const result = analysisModule.verify(root);
   assert.equal(result.ok, false);
   assert.deepEqual(result.tasks, []);
-  assert.match(result.errors.join(' '), /No tasks available/);
+  assert.match(result.errors.join(' '), /No supported test project/);
 }));
 
 test('nested .NET projects are detected without changing initial project type', () => sandbox(root => {
@@ -265,4 +267,243 @@ test('project brief does not demand approval for every scaffold', () => sandbox(
   const brief = readFileSync(join(root, '.aew/project-brief.md'), 'utf8');
   assert.match(brief, /minimal plan before scaffolding/);
   assert.doesNotMatch(brief, /without an approved plan/);
+}));
+
+test('v0.5.8 blocks recorded evidence from independent verification', () => sandbox(root => {
+  install(root);
+  const task = {id:'AEW-001',status:'done',criteria:[{id:'AC-1',description:'Works',status:'passed',evidence:'tests passed'}],issues:[],qa:{verdict:'accepted',evidence:'self-reported'}};
+  writeFileSync(join(root, '.aew/gates.json'), JSON.stringify({schemaVersion:1,tasks:[task]}));
+  const result = analysisModule.verify(root);
+  assert.equal(result.ok, false);
+  assert.equal(result.level, 'UNVERIFIED');
+  assert.match(result.errors.join(' '), /Legacy gates schema v1/);
+}));
+
+test('v0.5.8 uses light workflow by default and validates workflow mode', () => sandbox(root => {
+  install(root);
+  assert.equal(analysisModule.configShow(root).config.workflow.mode, 'light');
+  assert.equal(analysisModule.configSet(root, 'config.workflow.mode', 'strict'), 'strict');
+  assert.throws(() => analysisModule.configSet(root, 'config.workflow.mode', 'unsafe'), /light, standard or strict/);
+}));
+
+test('v0.5.8 does not install .NET-specific style settings for other stacks', () => sandbox(root => {
+  install(root, {project:{technology:'Python'}});
+  const stack = analysisModule.configShow(root).stack;
+  assert.equal(stack.technology, 'Python');
+  assert.equal(stack.codeStyle.programCs, undefined);
+  assert.equal(stack.codeStyle.comments, 'rationale-and-business-rules');
+}));
+
+test('v0.5.8 preserves .NET style guidance when .NET is selected', () => sandbox(root => {
+  install(root, {project:{technology:'.NET'}});
+  assert.equal(analysisModule.configShow(root).stack.codeStyle.programCs, 'composition-root');
+}));
+
+test('upgrade updates pristine managed files and protects modified templates', () => sandbox(root => {
+  install(root);
+  const managed = join(root, '.aew', 'SYSTEM.md');
+  writeFileSync(managed, 'custom rules');
+  const dry = analysisModule.upgrade(root, { dryRun: true });
+  assert.equal(dry.ok, false);
+  assert.ok(dry.results.some(x => x.relative === '.aew/SYSTEM.md' && x.action === 'conflict'));
+  assert.equal(readFileSync(managed, 'utf8'), 'custom rules');
+  const run = analysisModule.upgrade(root);
+  assert.equal(run.ok, false);
+  assert.equal(readFileSync(managed, 'utf8'), 'custom rules');
+}));
+
+test('upgrade reports legacy installations without manifest safely', () => sandbox(root => {
+  install(root);
+  rmSync(join(root, '.aew', 'managed.json'));
+  const result = analysisModule.upgrade(root);
+  assert.equal(result.ok, false);
+  assert.match(result.errors.join(' '), /legacy files/);
+}));
+
+test('migrated task files override legacy shared gates without deleting them', () => sandbox(root => {
+  install(root);
+  const task = {id:'AEW-001',status:'done',criteria:[{id:'AC-1',description:'Done',status:'passed',evidence:'log'}],issues:[],qa:{verdict:'accepted',evidence:'review'}};
+  const legacy = join(root, '.aew', 'gates.json');
+  writeFileSync(legacy, JSON.stringify({schemaVersion:1,tasks:[task]}));
+  const result = analysisModule.migrateTasks(root);
+  assert.equal(result.ok, true);
+  assert.ok(existsSync(join(root, '.aew/tasks/AEW-001.json')));
+  const migrated=JSON.parse(readFileSync(join(root,'.aew/tasks/AEW-001.json'),'utf8'));
+  assert.equal(migrated.status,'planned');
+  assert.equal(migrated.qa.verdict,'pending');
+  assert.equal(migrated.criteria[0].status,'pending');
+  assert.equal(analysisModule.verify(root).ok, false);
+  task.status = 'rework';
+  writeFileSync(legacy, JSON.stringify({schemaVersion:1,tasks:[task]}));
+  assert.equal(analysisModule.verify(root).ok, false);
+}));
+
+test('migration dry-run does not write task files', () => sandbox(root => {
+  install(root);
+  const legacy = join(root, '.aew', 'gates.json');
+  writeFileSync(legacy, JSON.stringify({schemaVersion:1,tasks:[{id:'AEW-001'}]}));
+  const result = analysisModule.migrateTasks(root, {dryRun:true});
+  assert.equal(result.results[0].action, 'planned');
+  assert.equal(existsSync(join(root, '.aew/tasks/AEW-001.json')), false);
+}));
+
+test('adapter skill descriptions contain concrete triggers', () => sandbox(root => {
+  install(root, {adapters:['codex','claude','gemini']});
+  const skill = readFileSync(join(root, '.claude/skills/aew-qa/SKILL.md'), 'utf8');
+  assert.match(skill, /Review acceptance evidence/);
+  assert.doesNotMatch(skill, /explicit \$aew-qa/);
+  const gemini = readFileSync(join(root, 'GEMINI.md'), 'utf8');
+  assert.match(gemini, /Gemini CLI/);
+}));
+
+const committed = root => {
+  const git = (...args) => execFileSync('git', args, {cwd:root,encoding:'utf8'}).trim();
+  git('init'); git('config','user.email','test@example.invalid'); git('config','user.name','Test');
+  git('remote','add','origin','https://github.com/ikeskin/aew-method.git');
+  git('add','.'); git('commit','-m','test baseline');
+  return git('rev-parse','HEAD');
+};
+test('risk is deterministic: agent cannot downgrade security-sensitive paths', () => {
+  assert.equal(classifyRisk(['src/feature.js']).risk, 'normal');
+  assert.equal(classifyRisk(['.github/workflows/ci.yml'], 'normal').risk, 'critical');
+  assert.equal(classifyRisk(['.aew/trust-policy.json'], 'normal').risk, 'critical');
+  assert.equal(classifyRisk(['src/Auth/Login.cs'], 'normal').risk, 'critical');
+  assert.equal(classifyRisk(['package.json'], 'normal').risk, 'critical');
+  assert.throws(() => classifyRisk([]), /complete changed-file list/);
+});
+test('v2 agent-authored acceptance without trusted CI is blocked', () => sandbox(root => {
+  install(root);
+  const record = {schemaVersion:2,id:'AEW-001',status:'done',criteria:[{id:'AC-1',description:'Works',status:'passed',evidence:'tests passed'}],issues:[],qa:{verdict:'accepted',evidence:'self approved'}};
+  writeFileSync(join(root,'.aew/gates.json'),JSON.stringify({schemaVersion:2,tasks:[record]}));
+  committed(root);
+  const result=verifyTrusted(root);
+  assert.equal(result.ok,false);
+  assert.equal(result.level,'UNVERIFIED');
+  assert.match(result.errors.join(' '), /No supported test project/);
+}));
+test('GitHub evidence rejects wrong-commit CI checks and untrusted applications', () => sandbox(root => {
+  install(root); const sha=committed(root);
+  const pr={number:2,head:{sha,repo:{full_name:'ikeskin/aew-method'}},user:{login:'author'}};
+  const policy={checkNames:['test (20)'],minimumRisk:'normal'};
+  const api=(r,p)=>p.includes('pulls?')?[[pr]]:p.includes('/files?')?[[{filename:'src/app.js'}]]:p.includes('/check-runs?')?[{check_runs:[{name:'test (20)',head_sha:'different',app:{slug:'github-actions'},conclusion:'success'}]}]:[[]];
+  assert.throws(()=>githubEvidence(root,sha,policy,api),/not successful/);
+  const wrongApp=(r,p)=>p.includes('/check-runs?')?[{check_runs:[{name:'test (20)',head_sha:sha,app:{slug:'untrusted-app'},conclusion:'success'}]}]:api(r,p);
+  assert.throws(()=>githubEvidence(root,sha,policy,wrongApp),/not successful/);
+}));
+test('optional GitHub CI reports risk without requiring a second human reviewer', () => sandbox(root => {
+  install(root); const sha=committed(root);
+  const pr={number:2,head:{sha,repo:{full_name:'ikeskin/aew-method'}},user:{login:'author'}};
+  const policy={checkNames:['test (20)'],minimumRisk:'normal'};
+  const api=(r,p)=>p.includes('pulls?')?[[pr]]:p.includes('/files?')?[[{filename:'.github/workflows/ci.yml'}]]:p.includes('/check-runs?')?[{check_runs:[{name:'test (20)',head_sha:sha,app:{slug:'github-actions'},conclusion:'success'}]}]:p.includes('/commits/')?[{author:{login:'commit-author'}}]:p.includes('/reviews?')?[[{id:1,state:'APPROVED',commit_id:sha,user:{type:'Bot',login:'review[bot]'}}]]:[[]];
+  assert.equal(githubEvidence(root,sha,policy,api).level,'CI_PASS');
+  const human=(r,p)=>p.includes('/reviews?')?[[{id:2,state:'APPROVED',commit_id:sha,user:{type:'User',login:'reviewer'}}]]:api(r,p);
+  assert.equal(githubEvidence(root,sha,policy,human).level,'CI_PASS');
+  const stale=(r,p)=>p.includes('/reviews?')?[[{id:2,state:'APPROVED',commit_id:'stale',user:{type:'User',login:'reviewer'}}]]:api(r,p);
+  assert.equal(githubEvidence(root,sha,policy,stale).level,'CI_PASS');
+  const author=(r,p)=>p.includes('/reviews?')?[[{id:3,state:'APPROVED',commit_id:sha,user:{type:'User',login:'commit-author'}}]]:api(r,p);
+  assert.equal(githubEvidence(root,sha,policy,author).level,'CI_PASS');
+}));
+
+test('aew check uses a real subprocess interface and only clean commit yields LOCAL_PASS', () => sandbox(root => {
+  install(root);
+  writeFileSync(join(root,'package.json'),JSON.stringify({scripts:{test:'node --test'}}));
+  committed(root);
+  let invoked;
+  const result=localCheck(root,{execute:(cmd,args,options)=>{invoked={cmd,args,options};return {status:0,stdout:`TAP version 13\n1..1\n# tests 1\n# pass 1\n# fail 0\n# skipped 0\n`};}});
+  assert.equal(result.result,'LOCAL_PASS');
+  assert.equal(invoked.cmd,'npm');
+  assert.deepEqual(invoked.args,['test','--','--test-reporter=tap']);
+  assert.equal(invoked.options.shell,false);
+  writeFileSync(join(root,'scratch.tmp'),'dirty');
+  const dirty=localCheck(root,{execute:()=>({status:0,stdout:`TAP version 13\n1..1\n# tests 1\n# pass 1\n# fail 0\n# skipped 0\n`})});
+  assert.equal(dirty.result,'LOCAL_PASS');
+  assert.equal(dirty.vcs.clean,false);
+  assert.equal(dirty.advisoryOnly,true);
+}));
+test('GitHub unavailable fails closed rather than accepting self-authored QA', () => sandbox(root => {
+  install(root);
+  const task={schemaVersion:2,id:'AEW-001',status:'done',criteria:[{id:'AC-1',description:'Works'}],issues:[],qa:{verdict:'accepted'}};
+  writeFileSync(join(root,'.aew/gates.json'),JSON.stringify({schemaVersion:2,tasks:[task]}));
+  committed(root);
+  const result=verifyTrusted(root,{ci:true,github:()=>{throw new Error('GitHub unavailable');}});
+  assert.equal(result.ok,false);
+  assert.equal(result.ok,false);
+  assert.match(result.errors.join(' '),/No supported test project|GitHub CI provider/);
+}));
+
+test('provider-neutral policy does not require a Git remote or any VCS', () => sandbox(root => {
+  install(root);
+  writeFileSync(join(root,'package.json'),JSON.stringify({scripts:{test:'node --test'}}));
+  const commands=[];
+  const result=localCheck(root,{execute:(cmd,args)=>{commands.push([cmd,...args]);return {status:0,stdout:`TAP version 13\n1..1\n# tests 1\n# pass 1\n# fail 0\n# skipped 0\n`};}});
+  assert.equal(result.result,'LOCAL_PASS');
+  assert.equal(result.vcs.type,'none');
+  assert.equal(result.vcs.revision,null);
+  assert.deepEqual(commands,[['npm','test','--','--test-reporter=tap']]);
+}));
+test('agent cannot obtain LOCAL_PASS from a trivial npm test script', () => sandbox(root => {
+  install(root);
+  writeFileSync(join(root,'package.json'),JSON.stringify({scripts:{test:'echo ok'}}));
+  assert.throws(()=>localCheck(root,{execute:()=>({status:0,stdout:`TAP version 13\n1..1\n# tests 1\n# pass 1\n# fail 0\n# skipped 0\n`})}),/unsafe npm test command/i);
+}));
+test('AEW runs checks without trusting task self-approval', () => sandbox(root => {
+  install(root);
+  writeFileSync(join(root,'package.json'),JSON.stringify({scripts:{test:'node --test'}}));
+  const task={schemaVersion:2,id:'AEW-001',status:'done',criteria:[{id:'AC-1',description:'Works'}],issues:[],qa:{verdict:'accepted',evidence:'self-approved'}};
+  writeFileSync(join(root,'.aew/gates.json'),JSON.stringify({schemaVersion:2,tasks:[task]}));
+  const failed=verifyTrusted(root,{execute:()=>({status:1,stdout:'failed'})});
+  assert.equal(failed.ok,false);
+  const passed=verifyTrusted(root,{execute:()=>({status:0,stdout:`TAP version 13\n1..1\n# tests 1\n# pass 1\n# fail 0\n# skipped 0\n`})});
+  assert.equal(passed.ok,true);
+  assert.equal(passed.level,'LOCAL_PASS');
+  assert.equal(passed.independentApproval,false);
+}));
+
+test('polyglot tooling-only package.json does not block dotnet tests', () => sandbox(root => {
+  install(root);
+  mkdirSync(join(root,'src'),{recursive:true});
+  writeFileSync(join(root,'src','App.csproj'),'<Project/>');
+  writeFileSync(join(root,'package.json'),JSON.stringify({scripts:{build:'vite build'}}));
+  assert.deepEqual(inferCheck(root),[['dotnet',['test']]]);
+}));
+test('recursive dotnet discovery ignores node_modules, bin and obj', () => sandbox(root => {
+  install(root);
+  for(const dir of ['node_modules','bin','obj']) {
+    mkdirSync(join(root,dir,'nested'),{recursive:true});
+    writeFileSync(join(root,dir,'nested','Fake.csproj'),'<Project/>');
+  }
+  writeFileSync(join(root,'package.json'),JSON.stringify({scripts:{test:'node --test'}}));
+  assert.deepEqual(inferCheck(root),[['npm',['test','--','--test-reporter=tap']]]);
+}));
+test('trivial node -e and passWithNoTests test commands are rejected', () => sandbox(root => {
+  install(root);
+  for(const cmd of ['node -e 0','jest --passWithNoTests','echo ok']) {
+    writeFileSync(join(root,'package.json'),JSON.stringify({scripts:{test:cmd}}));
+    assert.throws(()=>inferCheck(root),/unsafe npm test command/i);
+  }
+}));
+test('timeout is configurable and generated test files produce explicit warnings', () => sandbox(root => {
+  install(root);
+  writeFileSync(join(root,'package.json'),JSON.stringify({scripts:{test:'node --test'}}));
+  committed(root);
+  const outcome=localCheck(root,{timeoutMs:360000,execute:()=>{
+    writeFileSync(join(root,'coverage.tmp'),'generated');
+    return {status:0,stdout:`TAP version 13\n1..1\n# tests 1\n# pass 1\n# fail 0\n# skipped 0\n`};
+  }});
+  assert.equal(outcome.result,'LOCAL_PASS');
+  assert.equal(outcome.cleanCommitEvidence,false);
+  assert.equal(outcome.workingTreeChanged,true);
+  assert.match(outcome.warnings.join(' '),/Tests left uncommitted/);
+  const failed=localCheck(root,{timeoutMs:1000,execute:()=>({status:null,error:{code:'ETIMEDOUT',message:'timed out'}})});
+  assert.equal(failed.result,'UNVERIFIED');
+  assert.match(failed.warnings.join(' '),/timed out/);
+}));
+test('optional GitHub check verifies SHA after merge without an open PR', () => sandbox(root => {
+  install(root); const sha=committed(root);
+  const policy={checkNames:['test (20)']};
+  const api=(r,p)=>p.includes('pulls?')?[[]]:p.includes('check-runs?')?[{check_runs:[{name:'test (20)',head_sha:sha,app:{slug:'github-actions'},conclusion:'success'}]}]:[[]];
+  const result=githubEvidence(root,sha,policy,api);
+  assert.equal(result.level,'CI_PASS');
+  assert.equal(result.risk.risk,'unknown');
+  assert.match(result.risk.warning,/No open PR/);
 }));

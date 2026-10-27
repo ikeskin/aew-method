@@ -1,7 +1,10 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { stdin } from 'node:process';
+import { check as executeCheck, verifyTrusted } from './trust.js';
+import { tmpdir } from 'node:os';
+import { createHash } from 'node:crypto';
 import { banner, heading, notice, step, summary, select, multiSelect, askText } from './prompts.js';
 
 const methodRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../method');
@@ -14,6 +17,9 @@ const read = path => readFileSync(path, 'utf8');
 const normalize = x => String(x || '').trim().toLowerCase();
 const markers = { codex: 'AGENTS.md', claude: 'CLAUDE.md', gemini: 'GEMINI.md' };
 const skillRoots = { codex: '.agents/skills', claude: '.claude/skills' };
+const digest = content => createHash('sha256').update(content).digest('hex');
+const managedManifest = '.aew/managed.json';
+const isManagedTemplate = path => path.startsWith('.aew/agents/') || path.startsWith('.aew/standards/') || path.startsWith('.aew/workflows/') || path.startsWith('.aew/profiles/') || ['.aew/SYSTEM.md', '.aew/constitution.md', '.aew/routing.md', '.aew/trust-policy.json'].includes(path) || path.includes('/skills/');
 const skillPath = (adapter, role) => `${skillRoots[adapter]}/aew-${role}/SKILL.md`;
 
 
@@ -50,25 +56,36 @@ function installFile(root, relative, content, { dryRun = false } = {}) {
 }
 
 function skillContent(role) {
-  const name = `aew-${role}`;
+  const triggers = {
+    analyst: 'Clarify ambiguous requirements, constraints, or acceptance criteria before implementation.',
+    architect: 'Evaluate consequential architecture changes or significant technical trade-offs.',
+    developer: 'Implement a feature or bug fix and run relevant checks.',
+    qa: 'Review acceptance evidence, regression risks, and test gaps; do not self-certify independent approval.',
+    reviewer: 'Review code changes for correctness, maintainability, and security.',
+    devops: 'Review CI, deployment, infrastructure, or operational changes.'
+  };
   return `---
-name: ${name}
-description: AEW ${role} role. Use for explicit $${name} requests or when this role is needed by the selected workflow.
+name: aew-${role}
+description: ${triggers[role]}
 ---
 
-# ${name}
+# AEW ${role}
 
-Role: ${role}. Execute the user's requested scope, not an expanded project.
-Read \`.aew/agents/${role}.md\` only if its responsibilities are needed beyond this skill.
-Read relevant source and tests first. Load one applicable profile or standard only when a specific decision requires it; do not preload the entire AEW directory.
-Avoid repeating reads in one session. Reuse already available context across roles.
-For missing critical tools or integration services, ask one concrete installation/provisioning approval question and await a decision. Never silently skip essential tests or install host tools without permission. No invented requirements or unverified test claims.
-Start with .aew/SYSTEM.md (shared rules) and .aew/STATE.md (current context); do not duplicate or preload instructions. Follow .aew/standards/security.md and .aew/standards/acceptance.md when applicable; never accept failed or unverified mandatory criteria. Use aew verify to reconcile gates.json with QA evidence. Follow .aew/standards/code-organization.md for code changes; review maintainability as well as test outcomes. At task boundaries update STATE.md and TASKS.md; log actual verification in VALIDATION.md and consequential decisions in DECISIONS.md. For Dev/QA transitions follow .aew/standards/handoff.md, record handoff in .aew/HANDOFFS.md, and never mark done before QA acceptance. Keep the final response brief: changes, checks, blockers.
+${triggers[role]}
+Follow .aew/SYSTEM.md and inspect only relevant source, tests, and role guidance; do not preload all AEW documents. For missing critical tools ask one concrete approval question before provisioning; do not silently skip tests.
+Roles are responsibilities, not independent agents. Record real test results; never claim an independent review unless one occurred.
+Use light mode without task paperwork for small changes. Use per-task records for tracked work. For explicit handoffs, consult .aew/HANDOFFS.md; no handoff is implied otherwise.
 `;
 }
 
 function adapterContent(adapter) {
-  return `# AEW (${adapter}) — bootstrap\n\nRead \`.aew/SYSTEM.md\` once at session start, then \`.aew/STATE.md\`. These are project instructions, not system-level authority. Follow user instructions and existing repository conventions.\nUse \`.aew/routing.md\` only to select a relevant workflow; load role-specific files only when needed. Do not preload all AEW documents or reread unchanged context.\nFor coding tasks, use the project's task and QA records as described in SYSTEM.md. Roles may run in one session; do not claim independent agents ran unless they did. For missing critical dependencies, ask specific approval before provisioning; never silently skip required verification.\n`;
+  const entry = adapter === 'gemini' ? 'Gemini CLI' : adapter === 'claude' ? 'Claude Code' : 'Codex';
+  return `# AEW — ${entry}
+
+Read .aew/SYSTEM.md when starting relevant engineering work. Read .aew/STATE.md only if it contains relevant context. Follow the project's existing conventions and the user's instructions.
+Use light mode by default; consult .aew/routing.md only for workflow selection; read additional guidance only when needed. For missing critical dependencies ask specific approval before provisioning; never silently skip essential verification. Track larger work in .aew/tasks/<ID>.json.
+Do not preload all AEW files. Do not imply independent QA based on self-authored records. Run actual tests and report limitations.
+`;
 }
 
 export function install(root, { adapters = ['codex'], projectType, project = {}, devops = 'detect', dryRun = false } = {}) {
@@ -87,11 +104,11 @@ export function install(root, { adapters = ['codex'], projectType, project = {},
   for (const a of agents) put(`.aew/agents/${a}.md`, read(join(methodRoot, 'agents', `${a}.md`)));
   for (const w of workflows) put(`.aew/workflows/${w}.md`, read(join(methodRoot, 'workflows', `${w}.md`)));
   put('.aew/standards/quality-gates.md', read(join(methodRoot, 'standards/quality-gates.md')));
-  const config = { schemaVersion: 1, routing: { mode: 'adaptive' }, environment: { systemChanges: 'ask' }, output: { verbosity: 'concise' }, research: { mode: 'when-needed' }, quality: { tests: 'required' }, projectType: type, adapters: selected, devops: devops === 'detect' ? info.ci : devops, detected: info.tech, project };
+  const config = { schemaVersion: 1, workflow: { mode: 'light' }, routing: { mode: 'adaptive' }, environment: { systemChanges: 'ask' }, output: { verbosity: 'concise' }, research: { mode: 'when-needed' }, quality: { tests: 'required' }, projectType: type, adapters: selected, devops: devops === 'detect' ? info.ci : devops, detected: info.tech, project };
   put('.aew/config.json', JSON.stringify(config, null, 2) + '\n');
   put('.aew/project-brief.md', projectBrief(config));
-  put('.aew/stack.json', JSON.stringify({ schemaVersion: 1, technology: project.technology || 'undecided', frameworkVersion: null, database: null, testing: null, codeStyle: { programCs: 'composition-root', endpointOrganization: 'feature-grouped', dataAccess: 'separate-from-http', comments: 'rationale-and-business-rules', complexity: 'proportional' } }, null, 2) + '\n');
-  put('.aew/STATE.md', '# AEW Projectct State\n\nStatus: idle\nCurrent task: none\nLast completed: none\n\n## Focus\nNot started.\n\n## Verified\nNo verification recorded.\n\n## Blockers\nNone recorded.\n\n## Next\nSelect a task.\n');
+  put('.aew/stack.json', JSON.stringify({ schemaVersion: 1, technology: project.technology || (info.tech.length === 1 ? info.tech[0] : 'undecided'), frameworkVersion: null, database: null, testing: null, codeStyle: { comments: 'rationale-and-business-rules', complexity: 'proportional', ...(project.technology === '.NET' || info.tech.includes('.NET') ? { programCs: 'composition-root', endpointOrganization: 'feature-grouped', dataAccess: 'separate-from-http' } : {}) } }, null, 2) + '\n');
+  put('.aew/STATE.md', '# AEW Project State\n\nStatus: idle\nCurrent task: none\nLast completed: none\n\n## Focus\nNot started.\n\n## Verified\nNo verification recorded.\n\n## Blockers\nNone recorded.\n\n## Next\nSelect a task.\n');
   put('.aew/TASKS.md', '# AEW Tasks\n\nUse IDs AEW-001 onward. Keep tasks small and acceptance criteria observable.\n\n## Open\n\n## Completed\n');
   put('.aew/DECISIONS.md', '# AEW Decisions\n\nRecord consequential decisions only: ID, date, context, decision, rationale and trade-off. Do not manufacture decisions.\n');
   put('.aew/VALIDATION.md', '# AEW Validation\n\nAppend actual command, date, environment, passed/failed/skipped and blockers. Never describe unexecuted tests as passed.\n');
@@ -99,19 +116,72 @@ export function install(root, { adapters = ['codex'], projectType, project = {},
   put('.aew/standards/handoff.md', read(join(methodRoot, 'standards/handoff.md')));
   put('.aew/HANDOFFS.md', '# AEW Handoffs\n\nRecord role transitions with task ID, owner, evidence, review verdict and next action. No implied approvals.\n');
   put('.aew/ISSUES.md', '# AEW Open Issues\n\nRecord each issue ID, linked task, severity, status, impact, resolution and verification. Keep this narrative synchronized with gates.json.\n');
-  put('.aew/gates.json', JSON.stringify({ schemaVersion: 1, tasks: [] }, null, 2) + '\n');
+  put('.aew/gates.json', JSON.stringify({ schemaVersion: 2, tasks: [] }, null, 2) + '\n');
+  // CI integration is optional and intentionally not installed for every project.
   for (const standard of ['security', 'acceptance']) put(`.aew/standards/${standard}.md`, read(join(methodRoot, 'standards', `${standard}.md`))); 
   for (const a of selected) {
     put(markers[a], adapterContent(a));
     if (skillRoots[a]) for (const role of agents) put(skillPath(a, role), skillContent(role));
   }
+  if (!dryRun && !existsSync(join(root, managedManifest))) {
+    const files = Object.fromEntries(results.filter(r => r.action === 'written' && isManagedTemplate(r.relative)).map(r => [r.relative, digest(read(join(root, r.relative)))]));
+    mkdirSync(join(root, '.aew'), { recursive: true });
+    writeFileSync(join(root, managedManifest), JSON.stringify({ schemaVersion: 1, files }, null, 2) + '\n');
+  }
   return { info, results, config };
+}
+
+
+/** Update only files whose installed checksum still matches the prior managed version. */
+export function upgrade(root, { dryRun = false } = {}) {
+  const manifestPath = join(root, managedManifest);
+  if (!existsSync(manifestPath)) return { ok: false, results: [], errors: ['No managed manifest; legacy files cannot be safely overwritten. Run aew init to add missing files, then review existing templates manually.'] };
+  let manifest;
+  try { manifest = JSON.parse(read(manifestPath)); } catch { return { ok: false, results: [], errors: ['Invalid managed manifest'] }; }
+  if (manifest?.schemaVersion !== 1 || !manifest.files || typeof manifest.files !== 'object') return { ok: false, results: [], errors: ['Invalid managed manifest'] };
+  const config = jsonAt(root, 'config.json');
+  const temp = mkdtempSync(join(tmpdir(), 'aew-upgrade-'));
+  const results = [];
+  try {
+    install(temp, { adapters: config.adapters || ['codex'], projectType: config.projectType, project: config.project || {} });
+    const generated = JSON.parse(read(join(temp, managedManifest))).files;
+    const next = { ...manifest.files };
+    for (const [relative, newHash] of Object.entries(generated)) {
+      if (!isManagedTemplate(relative)) continue;
+      const target = join(root, relative);
+      const oldHash = manifest.files[relative];
+      if (existsSync(target) && !oldHash) { results.push({ relative, action: 'untracked' }); continue; }
+      if (existsSync(target) && digest(read(target)) !== oldHash) { results.push({ relative, action: 'conflict' }); continue; }
+      if (existsSync(target) && digest(read(target)) === newHash) { results.push({ relative, action: 'unchanged' }); next[relative] = newHash; continue; }
+      results.push({ relative, action: dryRun ? 'planned' : 'updated' });
+      if (!dryRun) { mkdirSync(dirname(target), { recursive: true }); writeFileSync(target, read(join(temp, relative))); next[relative] = newHash; }
+    }
+    if (!dryRun) writeFileSync(manifestPath, JSON.stringify({ schemaVersion: 1, files: next }, null, 2) + '\n');
+    return { ok: !results.some(r => ['conflict', 'untracked'].includes(r.action)), results, errors: [] };
+  } finally { rmSync(temp, { recursive: true, force: true }); }
+}
+
+/** One-way, non-destructive migration from shared legacy gates to per-task records. */
+export function migrateTasks(root, { dryRun = false } = {}) {
+  const legacy = jsonAt(root, 'gates.json');
+  if (legacy?.schemaVersion !== 1 || !Array.isArray(legacy.tasks)) throw new Error('Invalid legacy gates schema');
+  const results = [];
+  const ids = new Set();
+  for (const task of legacy.tasks) {
+    if (!task || typeof task.id !== 'string' || !/^AEW-\d+$/.test(task.id) || ids.has(task.id)) throw new Error('Invalid or duplicate legacy task ID');
+    ids.add(task.id);
+    const relative = `.aew/tasks/${task.id}.json`;
+    if (existsSync(join(root, relative))) { results.push({ relative, action: 'preserved' }); continue; }
+    results.push({ relative, action: dryRun ? 'planned' : 'written' });
+    if (!dryRun) { mkdirSync(dirname(join(root, relative)), { recursive: true }); writeFileSync(join(root, relative), JSON.stringify({ ...task, schemaVersion: 2, status: 'planned', qa: { verdict: 'pending', evidence: null }, criteria: Array.isArray(task.criteria) ? task.criteria.map(c => ({ ...c, status: 'pending', evidence: null })) : task.criteria }, null, 2) + '\n'); }
+  }
+  return { ok: true, results, legacyPreserved: true };
 }
 
 function projectBrief(config) {
   const p = config.project;
-  return `# Projectct Brief\n\n- **Projectct type:** ${config.projectType}\n- **Purpose:** ${p.purpose || 'To be clarified before implementation'}\n- **Application:** ${p.application || 'Undecided'}\n- **Technology preference:** ${p.technology || 'Undecided'}\n- **Architecture:** ${p.architecture || 'Prefer the simplest suitable design; validate against actual requirements'}
-- **Projectct profile:** .aew/profiles/project/${applications.includes(p.application) ? p.application : 'other'}.md
+  return `# Project Brief\n\n- **Project type:** ${config.projectType}\n- **Purpose:** ${p.purpose || 'To be clarified before implementation'}\n- **Application:** ${p.application || 'Undecided'}\n- **Technology preference:** ${p.technology || 'Undecided'}\n- **Architecture:** ${p.architecture || 'Prefer the simplest suitable design; validate against actual requirements'}
+- **Project profile:** .aew/profiles/project/${applications.includes(p.application) ? p.application : 'other'}.md
 - **Technology profile:** .aew/profiles/technology/${technologyProfiles.includes(p.technology) ? p.technology : 'generic'}.md\n\n## Engineering guidance\n\n- Establish a minimal plan before scaffolding. Ask for approval only for unresolved high-impact decisions or operations requiring explicit authorization.\n- Ask about missing domain rules and acceptance criteria before implementing features.\n- Avoid speculative abstractions and premature infrastructure.\n- Deployment choices are deferred until deployment requirements exist.\n`;
 }
 
@@ -169,9 +239,10 @@ export function configSet(root, key, value) {
   if (!['config', 'stack'].includes(scope) || !parts.length) throw new Error('Use config.<key> or stack.<key>');
   const filename = scope === 'config' ? 'config.json' : 'stack.json';
   const obj = jsonAt(root, filename);
-  const allowed = scope === 'config' ? ['routing.mode', 'environment.systemChanges', 'output.verbosity', 'research.mode', 'quality.tests'] : ['technology', 'frameworkVersion', 'database', 'testing', 'codeStyle.programCs', 'codeStyle.endpointOrganization', 'codeStyle.dataAccess', 'codeStyle.comments', 'codeStyle.complexity'];
+  const allowed = scope === 'config' ? ['workflow.mode', 'routing.mode', 'environment.systemChanges', 'output.verbosity', 'research.mode', 'quality.tests'] : ['technology', 'frameworkVersion', 'database', 'testing', 'codeStyle.programCs', 'codeStyle.endpointOrganization', 'codeStyle.dataAccess', 'codeStyle.comments', 'codeStyle.complexity'];
   const path = parts.join('.');
   if (!allowed.includes(path)) throw new Error(`Unsupported setting: ${key}`);
+  if (scope === 'config' && path === 'workflow.mode' && !['light', 'standard', 'strict'].includes(value)) throw new Error('workflow.mode must be light, standard or strict');
   const parsed = ['database', 'testing'].includes(path) ? (() => { try { return JSON.parse(value); } catch { return value; } })() : value;
   if (typeof parsed !== 'string' && parsed !== null && !['database', 'testing'].includes(path)) throw new Error('Expected a string setting');
   let cursor = obj;
@@ -185,49 +256,18 @@ export function projectStatus(root) {
 }
 
 
-// Machine-readable evidence is required: Markdown narratives alone cannot prove QA acceptance.
-export function verify(root, taskId = null) {
-  const errors = [];
-  let data;
-  try { data = jsonAt(root, 'gates.json'); } catch (error) { return { ok: false, tasks: [], errors: [`Cannot read gates.json: ${error.message}`] }; }
-  if (data?.schemaVersion !== 1 || !Array.isArray(data.tasks)) return { ok: false, tasks: [], errors: ['Invalid gates.json schema'] };
-  const selected = taskId ? data.tasks.filter(t => t.id === taskId) : data.tasks;
-  if (taskId && selected.length === 0) errors.push(`Task ${taskId} not found`);
-  if (!taskId && selected.length === 0) errors.push('No tasks available for verification');
-  const ids = new Set();
-  const tasks = selected.map(t => {
-    const reasons = [];
-    if (!t || typeof t.id !== 'string' || !/^AEW-\d+$/.test(t.id)) reasons.push('invalid task ID');
-    if (ids.has(t.id)) reasons.push('duplicate task ID');
-    ids.add(t.id);
-    if (!['planned','in-progress','qa-pending','rework','verification-blocked','done'].includes(t.status)) reasons.push('invalid task status');
-    if (!Array.isArray(t.criteria) || !t.criteria.length) reasons.push('missing acceptance criteria');
-    else for (const c of t.criteria) {
-      if (!c.id || !c.description) reasons.push('criterion missing ID/description');
-      if (c.status !== 'passed' || !c.evidence || typeof c.evidence !== 'string' || !c.evidence.trim()) reasons.push(`${c.id || 'criterion'}: not verified with evidence`);
-    }
-    if (!Array.isArray(t.issues)) reasons.push('missing issue register');
-    else for (const i of t.issues) {
-      if (!i.id || !['critical','high','medium','low'].includes(i.severity) || !['open','resolved','accepted-risk'].includes(i.status)) reasons.push('invalid issue entry');
-      if (i.status === 'open' && (i.blocksAcceptance !== false || ['critical','high'].includes(i.severity))) reasons.push(`${i.id}: blocking open issue`);
-      if (i.status === 'accepted-risk' && (!i.approval || !i.rationale)) reasons.push(`${i.id}: risk acceptance lacks explicit approval and rationale`);
-      if (i.status === 'accepted-risk' && ['critical','high'].includes(i.severity) && !i.approval) reasons.push(`${i.id}: high-risk acceptance requires human approval`);
-      if (i.status === 'resolved' && !i.evidence) reasons.push(`${i.id}: resolution lacks verification evidence`);
-    }
-    if (!t.qa || t.qa.verdict !== 'accepted' || !t.qa.evidence || !String(t.qa.evidence).trim()) reasons.push('QA acceptance evidence missing');
-    if (t.status !== 'done') reasons.push(`task status is ${t.status || 'missing'}, not done`);
-    return { id: t.id, ok: reasons.length === 0, reasons };
-  });
-  return { ok: errors.length === 0 && tasks.every(t => t.ok), tasks, errors };
+// Legacy v1 records are never trusted as a quality gate.
+export function verify(root, taskId = null, options = {}) {
+  return verifyTrusted(root, { taskId, ...options });
 }
 
 const option = (args, flag, fallback) => { const i = args.indexOf(flag); return i >= 0 ? (args[i + 1] || fallback) : fallback; };
 
 async function interview(info, defaults) {
   banner();
-  heading('Projectct setup', 'Start with the project. CI/CD can be configured later.');
+  heading('Project setup', 'Start with the project. CI/CD can be configured later.');
   notice(info.empty ? 'Empty workspace detected' : `Technologies: ${info.tech.join(', ') || 'Not detected yet'}`);
-  step(1, 5, 'Projectct status');
+  step(1, 5, 'Project status');
   const projectType = await select({ title: 'What is the current project status?', options: [
     { label: 'New project', description: 'No source code yet', value: 'new' },
     { label: 'Existing project', description: 'Preserve the existing structure', value: 'existing' },
@@ -239,7 +279,7 @@ async function interview(info, defaults) {
     { label: 'Mobile application', description: 'iOS / Android application', value: 'mobile' }, { label: 'CLI / Developer tool', description: 'Terminal tools and automation', value: 'cli' },
     { label: 'Library / SDK', description: 'Reusable package and public API', value: 'library' }, { label: 'Other / Not decided yet', description: 'Can be decided later', value: 'other' }
   ] });
-  step(3, 5, 'Projectct purpose');
+  step(3, 5, 'Project purpose');
   const purpose = await askText('What is the primary purpose of the project?', { placeholder: 'One short sentence; optional' });
   step(4, 5, 'Technology and architecture');
   const technology = await select({ title: 'What technology do you prefer?', options: [
@@ -264,9 +304,12 @@ async function interview(info, defaults) {
 export async function run(args, root = process.cwd()) {
   const [command = 'help', ...rest] = args;
   if (command === 'help' || args.includes('--help')) {
-    console.log('AEW Method v0.5.7\n  aew init [--yes] [--dry-run] [--adapters codex,claude,gemini]\n  aew analyze [--json]\n  aew inspect\n  aew doctor [--json]\n  aew status\n  aew tasks\n  aew handoffs\n  aew issues\n  aew verify [--json] [--task AEW-001]\n  aew config show\n  aew config set config.output.verbosity concise\n  aew config set stack.technology .NET\n  aew configure'); return;
+    console.log('AEW Method v0.5.8\n  aew init [--yes] [--dry-run] [--adapters codex,claude,gemini]\n  aew analyze [--json]\n  aew inspect\n  aew doctor [--json]\n  aew upgrade [--dry-run]\n  aew migrate-tasks [--dry-run]\n  aew status\n  aew tasks\n  aew handoffs\n  aew issues\n  aew check [--timeout-ms 180000]\n  aew verify [--json] [--task AEW-001] [--timeout-ms 180000] [--ci (optional GitHub)]\n  aew config show\n  aew config set config.output.verbosity concise\n  aew config set stack.technology .NET\n  aew configure'); return;
   }
-  if (command === 'verify') { const result = verify(root, option(rest, '--task', null)); if (rest.includes('--json')) console.log(JSON.stringify(result, null, 2)); else { console.log(result.ok ? '✓ AEW acceptance and security gates passed' : '✗ AEW acceptance/security gates blocked'); for (const item of result.tasks) console.log(`  ${item.id}: ${item.ok ? 'PASS' : 'BLOCKED'}${item.reasons.length ? ' — ' + item.reasons.join('; ') : ''}`); for (const error of result.errors) console.log(`  ERROR: ${error}`); } if (!result.ok) process.exitCode = 1; return; }
+  if (command === 'upgrade') { const result = upgrade(root, { dryRun: rest.includes('--dry-run') }); console.log(JSON.stringify(result, null, 2)); if (!result.ok) process.exitCode = 1; return; }
+  if (command === 'migrate-tasks') { console.log(JSON.stringify(migrateTasks(root, { dryRun: rest.includes('--dry-run') }), null, 2)); return; }
+  if (command === 'check') { const result = executeCheck(root, {timeoutMs: Number(option(rest,'--timeout-ms','180000'))}); console.log(JSON.stringify(result, null, 2)); if (result.result !== 'LOCAL_PASS') process.exitCode = 1; return; }
+  if (command === 'verify') { const result = verify(root, option(rest, '--task', null), {ci:rest.includes('--ci'),timeoutMs:Number(option(rest,'--timeout-ms','180000'))}); if (rest.includes('--json')) console.log(JSON.stringify(result, null, 2)); else { console.log(`${result.ok ? '✓' : '✗'} AEW trust verification: ${result.level} (required ${result.required || 'CI_PASS'})`); for (const error of result.errors) console.log(`  ERROR: ${error}`); for (const warning of result.evidence?.warnings || []) console.log(`  WARNING: ${warning}`); if (result.risk?.criticalPaths?.length) console.log(`  WARNING: critical changed paths: ${result.risk.criticalPaths.join(', ')}`); if (result.risk?.warning) console.log(`  WARNING: ${result.risk.warning}`); } if (!result.ok) process.exitCode = 1; return; }
   if (command === 'issues') { console.log(read(projectFile(root, 'ISSUES.md'))); return; }
   if (command === 'handoffs') { console.log(read(projectFile(root, 'HANDOFFS.md'))); return; }
   if (command === 'status' || command === 'tasks') { const status = projectStatus(root); console.log(command === 'status' ? status.state : status.tasks); return; }
@@ -281,8 +324,8 @@ export async function run(args, root = process.cwd()) {
     const report = analyze(root);
     if (rest.includes('--json')) console.log(JSON.stringify(report, null, 2));
     else {
-      heading('AEW · Projectct analysis');
-      console.log(`Technology: ${report.tech.join(', ') || 'Not detected'}\nConfigured technology: ${report.configured?.technology || 'Not specified'}\nProjectct profile: ${report.configured?.application || 'Not specified'}\nWorkspace: ${report.empty ? 'Empty' : 'Existing'}\nCI/CD: ${report.ci}\nTests at root: ${report.testsDetectedAtRoot ? 'Detected' : 'Not detected'}`);
+      heading('AEW · Project analysis');
+      console.log(`Technology: ${report.tech.join(', ') || 'Not detected'}\nConfigured technology: ${report.configured?.technology || 'Not specified'}\nProject profile: ${report.configured?.application || 'Not specified'}\nWorkspace: ${report.empty ? 'Empty' : 'Existing'}\nCI/CD: ${report.ci}\nTests at root: ${report.testsDetectedAtRoot ? 'Detected' : 'Not detected'}`);
       for (const note of report.observations) console.log(`• ${note}`);
       console.log(`\nNote: ${report.limitations.join(' ')}`);
     }

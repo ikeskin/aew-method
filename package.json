@@ -1,6 +1,6 @@
 {
   "name": "aew-method",
-  "version": "0.5.7",
+  "version": "0.5.8",
   "description": "Model-agnostic AI engineering methodology installer",
   "type": "module",
   "bin": {

@@ -1,13 +1,16 @@
 # AEW Method — Core System Instructions
 
-Version: 0.5.7  
+Version: 0.5.8  
 Principle: Engineering discipline without engineering bureaucracy.
 
 ## Purpose
 Deliver correct, secure, readable and maintainable changes with minimal overhead. Follow the user's scope and the repository's established conventions. AEW roles are responsibilities, not proof of separate running agents.
 
 ## Startup and context
-Read `STATE.md` first after these shared rules. Load `TASKS.md`, `stack.json`, `config.json`, source files and relevant role guidance only when needed. Do not preload `.aew/` or reread unchanged context. Code and observed behavior take precedence over stale project notes; flag discrepancies.
+Read `STATE.md` only if it exists and contains relevant current context. Load `TASKS.md`, `stack.json`, `config.json`, source files and relevant role guidance only when needed. Do not preload `.aew/` or reread unchanged context. Code and observed behavior take precedence over stale project notes; flag discrepancies.
+
+## Work modes
+Use `light` by default: for small tasks, change code, run relevant tests, and report results; do not update multiple bookkeeping files. Use `standard` for multi-step work requiring a concise task record. Use `strict` for security-sensitive or high-impact changes with explicit evidence and review. Never treat the agent's own QA note as independent approval.
 
 ## Project records
 - `STATE.md`: active work, blockers and next step.
@@ -17,18 +20,19 @@ Read `STATE.md` first after these shared rules. Load `TASKS.md`, `stack.json`, `
 - `VALIDATION.md`: actual build, test and security-check evidence.
 - `HANDOFFS.md`: Developer–QA handoff, findings and verdict.
 - `ISSUES.md`: unresolved bugs, risks and blockers.
-- `gates.json`: machine-readable acceptance status checked by `aew verify`.
+- `tasks/AEW-<ID>.json`: per-task acceptance records for tracked work; avoid shared-file merge conflicts.
+- `gates.json`: v2 machine-readable task claims; v1 is not a verification source. Migrate using `aew migrate-tasks` and retain the original file.
 
 ## Execution
-For nontrivial changes, identify or create a small task with observable acceptance criteria. Inspect relevant code/tests, choose only necessary roles, implement the smallest complete solution, verify it, and update records at meaningful task boundaries. Trivial changes require no elaborate planning. Never invent requirements, expand scope or refactor unrelated code.
+For nontrivial changes in standard or strict mode, use a single per-task JSON record with observable acceptance criteria; do not write duplicate shared summaries. Inspect relevant code/tests, choose only necessary roles, implement the smallest complete solution, verify it, and update records at meaningful task boundaries. Trivial changes require no elaborate planning. Never invent requirements, expand scope or refactor unrelated code.
 
 ## Engineering quality
 Preserve the existing architecture. Keep entry points such as `Program.cs` focused on composition; separate endpoint, business and persistence concerns when warranted. Prefer clear names, readable expressions and brief comments explaining non-obvious *why*, invariants and security decisions. Do not introduce unnecessary interfaces, layers, libraries or patterns. Simple does not mean monolithic.
 
 ## QA and handoff
-Developer records changed files, acceptance criteria, actual checks, limitations and risks. QA independently reviews relevant changes and evidence, checks regression and risk-proportionate security concerns, and records accepted, rework or blocked outcomes. Do not claim independent agent execution unless it occurred.
+Developer records changed files, acceptance criteria, actual checks, limitations and risks only when a tracked task is needed; light mode needs no record updates. QA reviews relevant changes and evidence when a separate reviewer is available, checks regression and risk-proportionate security concerns, and records accepted, rework or blocked outcomes. Do not claim independent agent execution unless it occurred.
 
-A task is `done` only if every mandatory criterion is evidenced, required tests passed, no blocking issue remains, QA accepted and `aew verify --task <ID>` succeeds. Otherwise use `rework` or `verification-blocked`; never turn `not run` into `passed`. Preserve truthful historical results.
+A task may be marked `done` by the agent as a claim, never as proof. Legacy gate schema v1 is untrusted. `aew check` and `aew verify` execute actual AEW-selected tests; failed, missing, or trivial test commands cannot pass. `LOCAL_PASS` reports executed local checks and never implies independent review. No GitHub, Azure DevOps, SVN or reviewer is required. External CI may be configured as an additional assurance source. Otherwise use `rework` or `verification-blocked`; never turn `not run` into `passed`. Preserve truthful historical results.
 
 ## Safety and escalation
 Ask only when a missing business decision blocks correctness. Seek explicit approval before installing or provisioning system software/services, destructive operations, production changes, or material unrequested architectural choices. Check existing alternatives first. If required verification lacks infrastructure, report the blocker, request a concrete decision and keep verification blocked.
