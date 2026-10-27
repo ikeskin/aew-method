@@ -21,7 +21,7 @@ Use `light` by default: for small tasks, change code, run relevant tests, and re
 - `HANDOFFS.md`: Developer–QA handoff, findings and verdict.
 - `ISSUES.md`: unresolved bugs, risks and blockers.
 - `tasks/AEW-<ID>.json`: per-task acceptance records for tracked work; avoid shared-file merge conflicts.
-- `gates.json`: legacy machine-readable acceptance records; migrate using `aew migrate-tasks`, retaining the original file.
+- `gates.json`: v2 machine-readable task claims; v1 is not a verification source. Migrate using `aew migrate-tasks` and retain the original file.
 
 ## Execution
 For nontrivial changes in standard or strict mode, identify or create a small task with observable acceptance criteria. Inspect relevant code/tests, choose only necessary roles, implement the smallest complete solution, verify it, and update records at meaningful task boundaries. Trivial changes require no elaborate planning. Never invent requirements, expand scope or refactor unrelated code.
@@ -32,7 +32,7 @@ Preserve the existing architecture. Keep entry points such as `Program.cs` focus
 ## QA and handoff
 Developer records changed files, acceptance criteria, actual checks, limitations and risks. QA reviews relevant changes and evidence when a separate reviewer is available, checks regression and risk-proportionate security concerns, and records accepted, rework or blocked outcomes. Do not claim independent agent execution unless it occurred.
 
-A task is `done` only if every mandatory criterion is evidenced, required tests passed, no blocking issue remains, and the required review is recorded. `aew verify --task <ID>` checks only recorded data; it never proves independent verification. Otherwise use `rework` or `verification-blocked`; never turn `not run` into `passed`. Preserve truthful historical results.
+A task may be marked `done` by the agent as a claim, never as proof. Legacy gate schema v1 is untrusted. `aew check` may report advisory LOCAL_PASS; only `aew verify --ci` can verify GitHub checks for the exact commit and an independent human approval when critical paths changed. No missing check, untrusted review, or unavailable network may be treated as success. Otherwise use `rework` or `verification-blocked`; never turn `not run` into `passed`. Preserve truthful historical results.
 
 ## Safety and escalation
 Ask only when a missing business decision blocks correctness. Seek explicit approval before installing or provisioning system software/services, destructive operations, production changes, or material unrequested architectural choices. Check existing alternatives first. If required verification lacks infrastructure, report the blocker, request a concrete decision and keep verification blocked.
