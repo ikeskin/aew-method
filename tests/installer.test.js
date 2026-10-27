@@ -4,6 +4,8 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import * as analysisModule from '../src/cli.js';
+import { classifyRisk, githubEvidence, verifyTrusted } from '../src/trust.js';
+import { execFileSync } from 'node:child_process';
 const { discover, install, doctor } = analysisModule;
 
 const sandbox = fn => { const dir = mkdtempSync(join(tmpdir(), 'aew-test-')); try { return fn(dir); } finally { rmSync(dir, { recursive: true, force: true }); } };
@@ -348,4 +350,50 @@ test('adapter skill descriptions contain concrete triggers', () => sandbox(root 
   assert.doesNotMatch(skill, /explicit \$aew-qa/);
   const gemini = readFileSync(join(root, 'GEMINI.md'), 'utf8');
   assert.match(gemini, /Gemini CLI/);
+}));
+
+const committed = root => {
+  const git = (...args) => execFileSync('git', args, {cwd:root,encoding:'utf8'}).trim();
+  git('init'); git('config','user.email','test@example.invalid'); git('config','user.name','Test');
+  git('remote','add','origin','https://github.com/ikeskin/aew-method.git');
+  git('add','.'); git('commit','-m','test baseline');
+  return git('rev-parse','HEAD');
+};
+test('risk is deterministic: agent cannot downgrade security-sensitive paths', () => {
+  assert.equal(classifyRisk(['src/feature.js']).risk, 'normal');
+  assert.equal(classifyRisk(['.github/workflows/ci.yml'], 'normal').risk, 'critical');
+  assert.equal(classifyRisk(['.aew/trust-policy.json'], 'normal').risk, 'critical');
+  assert.equal(classifyRisk(['src/Auth/Login.cs'], 'normal').risk, 'critical');
+  assert.equal(classifyRisk(['package.json'], 'normal').risk, 'critical');
+  assert.throws(() => classifyRisk([]), /complete changed-file list/);
+});
+test('v2 agent-authored acceptance without trusted CI is blocked', () => sandbox(root => {
+  install(root);
+  const record = {schemaVersion:2,id:'AEW-001',status:'done',criteria:[{id:'AC-1',description:'Works',status:'passed',evidence:'tests passed'}],issues:[],qa:{verdict:'accepted',evidence:'self approved'}};
+  writeFileSync(join(root,'.aew/gates.json'),JSON.stringify({schemaVersion:2,tasks:[record]}));
+  committed(root);
+  const result=verifyTrusted(root);
+  assert.equal(result.ok,false);
+  assert.equal(result.level,'UNVERIFIED');
+  assert.match(result.errors.join(' '), /Independent CI verification not requested/);
+}));
+test('GitHub evidence rejects wrong-commit CI checks and untrusted applications', () => sandbox(root => {
+  install(root); const sha=committed(root);
+  const pr={number:2,head:{sha,repo:{full_name:'ikeskin/aew-method'}},user:{login:'author'}};
+  const policy={checkNames:['test (20)'],minimumRisk:'normal'};
+  const api=(r,p)=>p.includes('pulls?')?[[pr]]:p.includes('/files?')?[[{filename:'src/app.js'}]]:p.includes('/check-runs?')?[{check_runs:[{name:'test (20)',head_sha:'different',app:{slug:'github-actions'},conclusion:'success'}]}]:[[]];
+  assert.throws(()=>githubEvidence(root,sha,policy,api),/not successful/);
+  const wrongApp=(r,p)=>p.includes('/check-runs?')?[{check_runs:[{name:'test (20)',head_sha:sha,app:{slug:'untrusted-app'},conclusion:'success'}]}]:api(r,p);
+  assert.throws(()=>githubEvidence(root,sha,policy,wrongApp),/not successful/);
+}));
+test('GitHub critical changes require current human review, not bot or author', () => sandbox(root => {
+  install(root); const sha=committed(root);
+  const pr={number:2,head:{sha,repo:{full_name:'ikeskin/aew-method'}},user:{login:'author'}};
+  const policy={checkNames:['test (20)'],minimumRisk:'normal'};
+  const api=(r,p)=>p.includes('pulls?')?[[pr]]:p.includes('/files?')?[[{filename:'.github/workflows/ci.yml'}]]:p.includes('/check-runs?')?[{check_runs:[{name:'test (20)',head_sha:sha,app:{slug:'github-actions'},conclusion:'success'}]}]:p.includes('/reviews?')?[[{id:1,state:'APPROVED',commit_id:sha,user:{type:'Bot',login:'review[bot]'}}]]:[[]];
+  assert.equal(githubEvidence(root,sha,policy,api).level,'CI_PASS');
+  const human=(r,p)=>p.includes('/reviews?')?[[{id:2,state:'APPROVED',commit_id:sha,user:{type:'User',login:'reviewer'}}]]:api(r,p);
+  assert.equal(githubEvidence(root,sha,policy,human).level,'REVIEWED');
+  const stale=(r,p)=>p.includes('/reviews?')?[[{id:2,state:'APPROVED',commit_id:'stale',user:{type:'User',login:'reviewer'}}]]:api(r,p);
+  assert.equal(githubEvidence(root,sha,policy,stale).level,'CI_PASS');
 }));
