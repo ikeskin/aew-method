@@ -155,12 +155,12 @@ export function migrateTasks(root, { dryRun = false } = {}) {
   const results = [];
   const ids = new Set();
   for (const task of legacy.tasks) {
-    if (!task || typeof task.id !== 'string' || !/^AEW-\\d+$/.test(task.id) || ids.has(task.id)) throw new Error('Invalid or duplicate legacy task ID');
+    if (!task || typeof task.id !== 'string' || !/^AEW-\d+$/.test(task.id) || ids.has(task.id)) throw new Error('Invalid or duplicate legacy task ID');
     ids.add(task.id);
     const relative = `.aew/tasks/${task.id}.json`;
     if (existsSync(join(root, relative))) { results.push({ relative, action: 'preserved' }); continue; }
     results.push({ relative, action: dryRun ? 'planned' : 'written' });
-    if (!dryRun) { mkdirSync(dirname(join(root, relative)), { recursive: true }); writeFileSync(join(root, relative), JSON.stringify(task, null, 2) + '\\n'); }
+    if (!dryRun) { mkdirSync(dirname(join(root, relative)), { recursive: true }); writeFileSync(join(root, relative), JSON.stringify(task, null, 2) + '\n'); }
   }
   return { ok: true, results, legacyPreserved: true };
 }
@@ -249,7 +249,7 @@ export function verify(root, taskId = null) {
   let data;
   try {
     const dir = join(root, '.aew/tasks');
-    const files = existsSync(dir) ? readdirSync(dir).filter(name => /^AEW-\\d+\\.json$/.test(name)).sort() : [];
+    const files = existsSync(dir) ? readdirSync(dir).filter(name => /^AEW-\d+\.json$/.test(name)).sort() : [];
     data = files.length ? { schemaVersion: 1, tasks: files.map(name => JSON.parse(read(join(dir, name)))) } : jsonAt(root, 'gates.json');
   } catch (error) { return { ok: false, tasks: [], errors: [`Cannot read task records: ${error.message}`] }; }
   if (data?.schemaVersion !== 1 || !Array.isArray(data.tasks)) return { ok: false, tasks: [], errors: ['Invalid gates.json schema'] };
