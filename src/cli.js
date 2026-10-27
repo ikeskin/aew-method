@@ -117,7 +117,7 @@ export function install(root, { adapters = ['codex'], projectType, project = {},
   put('.aew/HANDOFFS.md', '# AEW Handoffs\n\nRecord role transitions with task ID, owner, evidence, review verdict and next action. No implied approvals.\n');
   put('.aew/ISSUES.md', '# AEW Open Issues\n\nRecord each issue ID, linked task, severity, status, impact, resolution and verification. Keep this narrative synchronized with gates.json.\n');
   put('.aew/gates.json', JSON.stringify({ schemaVersion: 2, tasks: [] }, null, 2) + '\n');
-  put('.aew/trust-policy.json', JSON.stringify({ schemaVersion: 1, checkNames: ['test (20)', 'test (22)', 'test (24)'], minimumRisk: 'normal' }, null, 2) + '\n');
+  // CI integration is optional and intentionally not installed for every project.
   for (const standard of ['security', 'acceptance']) put(`.aew/standards/${standard}.md`, read(join(methodRoot, 'standards', `${standard}.md`))); 
   for (const a of selected) {
     put(markers[a], adapterContent(a));
@@ -304,7 +304,7 @@ async function interview(info, defaults) {
 export async function run(args, root = process.cwd()) {
   const [command = 'help', ...rest] = args;
   if (command === 'help' || args.includes('--help')) {
-    console.log('AEW Method v0.5.8\n  aew init [--yes] [--dry-run] [--adapters codex,claude,gemini]\n  aew analyze [--json]\n  aew inspect\n  aew doctor [--json]\n  aew upgrade [--dry-run]\n  aew migrate-tasks [--dry-run]\n  aew status\n  aew tasks\n  aew handoffs\n  aew issues\n  aew check\n  aew verify [--ci] [--json] [--task AEW-001]\n  aew config show\n  aew config set config.output.verbosity concise\n  aew config set stack.technology .NET\n  aew configure'); return;
+    console.log('AEW Method v0.5.8\n  aew init [--yes] [--dry-run] [--adapters codex,claude,gemini]\n  aew analyze [--json]\n  aew inspect\n  aew doctor [--json]\n  aew upgrade [--dry-run]\n  aew migrate-tasks [--dry-run]\n  aew status\n  aew tasks\n  aew handoffs\n  aew issues\n  aew check\n  aew verify [--json] [--task AEW-001] [--ci (optional GitHub)]\n  aew config show\n  aew config set config.output.verbosity concise\n  aew config set stack.technology .NET\n  aew configure'); return;
   }
   if (command === 'upgrade') { const result = upgrade(root, { dryRun: rest.includes('--dry-run') }); console.log(JSON.stringify(result, null, 2)); if (!result.ok) process.exitCode = 1; return; }
   if (command === 'migrate-tasks') { console.log(JSON.stringify(migrateTasks(root, { dryRun: rest.includes('--dry-run') }), null, 2)); return; }
