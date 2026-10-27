@@ -53,7 +53,7 @@ function skillContent(role) {
   const name = `aew-${role}`;
   return `---
 name: ${name}
-description: AEW ${role} role. Use for explicit $${name} requests or when this role is needed by the selected workflow.
+description: AEW ${role} responsibility. Read when a task specifically requires ${role} analysis or review; not a separate agent or automatic approval.
 ---
 
 # ${name}
@@ -87,11 +87,11 @@ export function install(root, { adapters = ['codex'], projectType, project = {},
   for (const a of agents) put(`.aew/agents/${a}.md`, read(join(methodRoot, 'agents', `${a}.md`)));
   for (const w of workflows) put(`.aew/workflows/${w}.md`, read(join(methodRoot, 'workflows', `${w}.md`)));
   put('.aew/standards/quality-gates.md', read(join(methodRoot, 'standards/quality-gates.md')));
-  const config = { schemaVersion: 1, routing: { mode: 'adaptive' }, environment: { systemChanges: 'ask' }, output: { verbosity: 'concise' }, research: { mode: 'when-needed' }, quality: { tests: 'required' }, projectType: type, adapters: selected, devops: devops === 'detect' ? info.ci : devops, detected: info.tech, project };
+  const config = { schemaVersion: 1, workflow: { mode: 'light' }, routing: { mode: 'adaptive' }, environment: { systemChanges: 'ask' }, output: { verbosity: 'concise' }, research: { mode: 'when-needed' }, quality: { tests: 'required' }, projectType: type, adapters: selected, devops: devops === 'detect' ? info.ci : devops, detected: info.tech, project };
   put('.aew/config.json', JSON.stringify(config, null, 2) + '\n');
   put('.aew/project-brief.md', projectBrief(config));
-  put('.aew/stack.json', JSON.stringify({ schemaVersion: 1, technology: project.technology || 'undecided', frameworkVersion: null, database: null, testing: null, codeStyle: { programCs: 'composition-root', endpointOrganization: 'feature-grouped', dataAccess: 'separate-from-http', comments: 'rationale-and-business-rules', complexity: 'proportional' } }, null, 2) + '\n');
-  put('.aew/STATE.md', '# AEW Projectct State\n\nStatus: idle\nCurrent task: none\nLast completed: none\n\n## Focus\nNot started.\n\n## Verified\nNo verification recorded.\n\n## Blockers\nNone recorded.\n\n## Next\nSelect a task.\n');
+  put('.aew/stack.json', JSON.stringify({ schemaVersion: 1, technology: project.technology || (info.tech.length === 1 ? info.tech[0] : 'undecided'), frameworkVersion: null, database: null, testing: null, codeStyle: { comments: 'rationale-and-business-rules', complexity: 'proportional', ...(project.technology === '.NET' || info.tech.includes('.NET') ? { programCs: 'composition-root', endpointOrganization: 'feature-grouped', dataAccess: 'separate-from-http' } : {}) } }, null, 2) + '\n');
+  put('.aew/STATE.md', '# AEW Project State\n\nStatus: idle\nCurrent task: none\nLast completed: none\n\n## Focus\nNot started.\n\n## Verified\nNo verification recorded.\n\n## Blockers\nNone recorded.\n\n## Next\nSelect a task.\n');
   put('.aew/TASKS.md', '# AEW Tasks\n\nUse IDs AEW-001 onward. Keep tasks small and acceptance criteria observable.\n\n## Open\n\n## Completed\n');
   put('.aew/DECISIONS.md', '# AEW Decisions\n\nRecord consequential decisions only: ID, date, context, decision, rationale and trade-off. Do not manufacture decisions.\n');
   put('.aew/VALIDATION.md', '# AEW Validation\n\nAppend actual command, date, environment, passed/failed/skipped and blockers. Never describe unexecuted tests as passed.\n');
@@ -169,9 +169,10 @@ export function configSet(root, key, value) {
   if (!['config', 'stack'].includes(scope) || !parts.length) throw new Error('Use config.<key> or stack.<key>');
   const filename = scope === 'config' ? 'config.json' : 'stack.json';
   const obj = jsonAt(root, filename);
-  const allowed = scope === 'config' ? ['routing.mode', 'environment.systemChanges', 'output.verbosity', 'research.mode', 'quality.tests'] : ['technology', 'frameworkVersion', 'database', 'testing', 'codeStyle.programCs', 'codeStyle.endpointOrganization', 'codeStyle.dataAccess', 'codeStyle.comments', 'codeStyle.complexity'];
+  const allowed = scope === 'config' ? ['workflow.mode', 'routing.mode', 'environment.systemChanges', 'output.verbosity', 'research.mode', 'quality.tests'] : ['technology', 'frameworkVersion', 'database', 'testing', 'codeStyle.programCs', 'codeStyle.endpointOrganization', 'codeStyle.dataAccess', 'codeStyle.comments', 'codeStyle.complexity'];
   const path = parts.join('.');
   if (!allowed.includes(path)) throw new Error(`Unsupported setting: ${key}`);
+  if (scope === 'config' && path === 'workflow.mode' && !['light', 'standard', 'strict'].includes(value)) throw new Error('workflow.mode must be light, standard or strict');
   const parsed = ['database', 'testing'].includes(path) ? (() => { try { return JSON.parse(value); } catch { return value; } })() : value;
   if (typeof parsed !== 'string' && parsed !== null && !['database', 'testing'].includes(path)) throw new Error('Expected a string setting');
   let cursor = obj;
@@ -216,9 +217,9 @@ export function verify(root, taskId = null) {
     }
     if (!t.qa || t.qa.verdict !== 'accepted' || !t.qa.evidence || !String(t.qa.evidence).trim()) reasons.push('QA acceptance evidence missing');
     if (t.status !== 'done') reasons.push(`task status is ${t.status || 'missing'}, not done`);
-    return { id: t.id, ok: reasons.length === 0, reasons };
+    return { id: t.id, ok: reasons.length === 0, reasons, verification: reasons.length ? 'blocked' : 'recorded-only' };
   });
-  return { ok: errors.length === 0 && tasks.every(t => t.ok), tasks, errors };
+  return { ok: errors.length === 0 && tasks.every(t => t.ok), verification: errors.length || tasks.some(t => !t.ok) ? 'blocked' : 'recorded-only', independentlyVerified: false, tasks, errors };
 }
 
 const option = (args, flag, fallback) => { const i = args.indexOf(flag); return i >= 0 ? (args[i + 1] || fallback) : fallback; };
@@ -264,9 +265,9 @@ async function interview(info, defaults) {
 export async function run(args, root = process.cwd()) {
   const [command = 'help', ...rest] = args;
   if (command === 'help' || args.includes('--help')) {
-    console.log('AEW Method v0.5.7\n  aew init [--yes] [--dry-run] [--adapters codex,claude,gemini]\n  aew analyze [--json]\n  aew inspect\n  aew doctor [--json]\n  aew status\n  aew tasks\n  aew handoffs\n  aew issues\n  aew verify [--json] [--task AEW-001]\n  aew config show\n  aew config set config.output.verbosity concise\n  aew config set stack.technology .NET\n  aew configure'); return;
+    console.log('AEW Method v0.5.8\n  aew init [--yes] [--dry-run] [--adapters codex,claude,gemini]\n  aew analyze [--json]\n  aew inspect\n  aew doctor [--json]\n  aew status\n  aew tasks\n  aew handoffs\n  aew issues\n  aew verify [--json] [--task AEW-001]\n  aew config show\n  aew config set config.output.verbosity concise\n  aew config set stack.technology .NET\n  aew configure'); return;
   }
-  if (command === 'verify') { const result = verify(root, option(rest, '--task', null)); if (rest.includes('--json')) console.log(JSON.stringify(result, null, 2)); else { console.log(result.ok ? '✓ AEW acceptance and security gates passed' : '✗ AEW acceptance/security gates blocked'); for (const item of result.tasks) console.log(`  ${item.id}: ${item.ok ? 'PASS' : 'BLOCKED'}${item.reasons.length ? ' — ' + item.reasons.join('; ') : ''}`); for (const error of result.errors) console.log(`  ERROR: ${error}`); } if (!result.ok) process.exitCode = 1; return; }
+  if (command === 'verify') { const result = verify(root, option(rest, '--task', null)); if (rest.includes('--json')) console.log(JSON.stringify(result, null, 2)); else { console.log(result.ok ? '✓ AEW recorded gates consistent (NOT independently verified)' : '✗ AEW recorded gates blocked'); for (const item of result.tasks) console.log(`  ${item.id}: ${item.ok ? 'PASS' : 'BLOCKED'}${item.reasons.length ? ' — ' + item.reasons.join('; ') : ''}`); for (const error of result.errors) console.log(`  ERROR: ${error}`); } if (!result.ok) process.exitCode = 1; return; }
   if (command === 'issues') { console.log(read(projectFile(root, 'ISSUES.md'))); return; }
   if (command === 'handoffs') { console.log(read(projectFile(root, 'HANDOFFS.md'))); return; }
   if (command === 'status' || command === 'tasks') { const status = projectStatus(root); console.log(command === 'status' ? status.state : status.tasks); return; }
