@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync, readFileSync, existsSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import * as analysisModule from '../src/cli.js';
@@ -229,3 +229,40 @@ test('central SYSTEM.md is installed and referenced by adapter bootstrap', () =>
     assert.equal(doctor(root).ok, true);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
+
+test('empty verification fails rather than reporting a false PASS', () => sandbox(root => {
+  install(root);
+  const result = analysisModule.verify(root);
+  assert.equal(result.ok, false);
+  assert.deepEqual(result.tasks, []);
+  assert.match(result.errors.join(' '), /No tasks available/);
+}));
+
+test('nested .NET projects are detected without changing initial project type', () => sandbox(root => {
+  install(root);
+  mkdirSync(join(root, 'src', 'Api'), { recursive: true });
+  writeFileSync(join(root, 'src', 'Api', 'Api.csproj'), '<Project />');
+  assert.ok(discover(root).tech.includes('.NET'));
+  const report = doctor(root);
+  assert.equal(report.ok, true);
+  assert.equal(report.config.projectType, 'new');
+  assert.ok(report.diagnostics.some(message => message.includes('Detected technologies differ')));
+  assert.ok(report.diagnostics.some(message => message.includes('initialized as new')));
+}));
+
+test('doctor diagnoses missing files and preserves existing project records', () => sandbox(root => {
+  install(root);
+  rmSync(join(root, '.aew', 'gates.json'));
+  const result = doctor(root);
+  assert.equal(result.ok, false);
+  assert.ok(result.diagnostics.some(message => message.includes('Installation incomplete')));
+  install(root);
+  assert.equal(doctor(root).ok, true);
+}));
+
+test('project brief does not demand approval for every scaffold', () => sandbox(root => {
+  install(root);
+  const brief = readFileSync(join(root, '.aew/project-brief.md'), 'utf8');
+  assert.match(brief, /minimal plan before scaffolding/);
+  assert.doesNotMatch(brief, /without an approved plan/);
+}));
