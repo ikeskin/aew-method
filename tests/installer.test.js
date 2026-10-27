@@ -225,7 +225,7 @@ test('v0.5.9 bootstraps all adapters without loading SYSTEM.md', () => sandbox(r
   for(const name of ['AGENTS.md','CLAUDE.md','GEMINI.md']) {
     const content=readFileSync(join(root,name),'utf8');
     assert.ok(content.split('\\n').length <= 9);
-    assert.doesNotMatch(content,/SYSTEM\\.md|@\\.aew\\//);
+    assert.ok(!content.includes('SYSTEM.md') && !content.includes('@.aew/'));
   }
   const skill=readFileSync(join(root,'.claude/skills/aew-qa/SKILL.md'),'utf8');
   assert.match(skill,/independent QA/);
