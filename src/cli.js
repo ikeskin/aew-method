@@ -19,7 +19,7 @@ const markers = { codex: 'AGENTS.md', claude: 'CLAUDE.md', gemini: 'GEMINI.md' }
 const skillRoots = { codex: '.agents/skills', claude: '.claude/skills' };
 const digest = content => createHash('sha256').update(content).digest('hex');
 const managedManifest = '.aew/managed.json';
-const isManagedTemplate = path => path.startsWith('.aew/agents/') || path.startsWith('.aew/standards/') || path.startsWith('.aew/workflows/') || path.startsWith('.aew/profiles/') || ['.aew/SYSTEM.md', '.aew/constitution.md', '.aew/routing.md', '.aew/trust-policy.json'].includes(path) || path.includes('/skills/');
+const isManagedTemplate = path => path.startsWith('.aew/agents/') || path.startsWith('.aew/standards/') || path.startsWith('.aew/workflows/') || path.startsWith('.aew/profiles/') || ['.aew/constitution.md', '.aew/routing.md', '.aew/trust-policy.json'].includes(path) || path.includes('/skills/');
 const skillPath = (adapter, role) => `${skillRoots[adapter]}/aew-${role}/SKILL.md`;
 
 
@@ -56,25 +56,33 @@ function installFile(root, relative, content, { dryRun = false } = {}) {
 }
 
 function skillContent(role) {
-  const triggers = {
-    analyst: 'Clarify ambiguous requirements, constraints, or acceptance criteria before implementation.',
-    architect: 'Evaluate consequential architecture changes or significant technical trade-offs.',
-    developer: 'Implement a feature or bug fix and run relevant checks.',
-    qa: 'Review acceptance evidence, regression risks, and test gaps; do not self-certify independent approval.',
-    reviewer: 'Review code changes for correctness, maintainability, and security.',
-    devops: 'Review CI, deployment, infrastructure, or operational changes.'
+  // Descriptions are visible even when the skill is never opened. Keep them terse.
+  const descriptions = {
+    analyst: 'Clarify ambiguous requirements and acceptance criteria.',
+    architect: 'Assess architecture choices and trade-offs.',
+    developer: 'Implement changes and verify actual tests.',
+    qa: 'Check acceptance evidence, regressions and blockers.',
+    reviewer: 'Review correctness, security and maintainability.',
+    devops: 'Assess deployment, CI and infrastructure changes.'
+  };
+  const procedures = {
+    analyst: 'Identify intent, invariants and concrete acceptance criteria. Ask only questions blocking correctness. For tracked standard/strict work, use the relevant per-task record; light mode needs no paperwork.',
+    architect: 'Preserve existing structure; introduce abstractions only when justified. Document consequential choices and rejected alternatives only when necessary.',
+    developer: 'Inspect relevant code, implement the smallest complete change, and run appropriate tests. Treat test count and test changes as evidence limits. Never mark an unexecuted check as passed. In light mode, do not update shared status files.',
+    qa: 'Inspect acceptance criteria and actual test output; check regressions, security and unresolved issues. A passed test is not proof of complete coverage. Never claim independent QA if the same agent performed the work. In tracked work, record issues in the per-task file.',
+    reviewer: 'Review the diff for correctness, security, readability and test integrity. Pay particular attention to modified tests and tests that no longer assert behavior. Report findings with concrete file locations; do not self-certify independent approval.',
+    devops: 'Inspect deployment safety, CI/test changes and operational risks. Do not install system software, start external services or deploy to production without explicit user authorization. Report blocked checks honestly.'
   };
   return `---
 name: aew-${role}
-description: ${triggers[role]}
+description: ${descriptions[role]}
 ---
 
 # AEW ${role}
 
-${triggers[role]}
-Follow .aew/SYSTEM.md and inspect only relevant source, tests, and role guidance; do not preload all AEW documents. For missing critical tools ask one concrete approval question before provisioning; do not silently skip tests.
-Roles are responsibilities, not independent agents. Record real test results; never claim an independent review unless one occurred.
-Use light mode without task paperwork for small changes. Use per-task records for tracked work. For explicit handoffs, consult .aew/HANDOFFS.md; no handoff is implied otherwise.
+${procedures[role]}
+
+Only when needed, open the relevant .aew/standards/ or .aew/workflows/ file. Avoid loading unrelated guidance. For standard/strict tasks, prefer one .aew/tasks/AEW-<ID>.json record over shared mutable summaries.
 `;
 }
 
@@ -82,9 +90,11 @@ function adapterContent(adapter) {
   const entry = adapter === 'gemini' ? 'Gemini CLI' : adapter === 'claude' ? 'Claude Code' : 'Codex';
   return `# AEW — ${entry}
 
-Read .aew/SYSTEM.md when starting relevant engineering work. Read .aew/STATE.md only if it contains relevant context. Follow the project's existing conventions and the user's instructions.
-Use light mode by default; consult .aew/routing.md only for workflow selection; read additional guidance only when needed. For missing critical dependencies ask specific approval before provisioning; never silently skip essential verification. Track larger work in .aew/tasks/<ID>.json.
-Do not preload all AEW files. Do not imply independent QA based on self-authored records. Run actual tests and report limitations.
+- Respect project conventions; keep changes scoped and simple.
+- Never report unexecuted tests as passed or imply independent QA.
+- Ask before installing tools, provisioning services or deploying.
+- Run relevant tests; use \`aew verify\` to check executable evidence when applicable.
+- Light mode needs no task paperwork; load relevant AEW skills only on demand.
 `;
 }
 
@@ -95,7 +105,6 @@ export function install(root, { adapters = ['codex'], projectType, project = {},
   const type = projectType || (info.empty ? 'new' : 'existing');
   const results = [];
   const put = (rel, content) => results.push(installFile(root, rel, content, { dryRun }));
-  put('.aew/SYSTEM.md', read(join(methodRoot, 'SYSTEM.md')));
   put('.aew/constitution.md', read(join(methodRoot, 'constitution.md')));
   put('.aew/routing.md', read(join(methodRoot, 'routing.md')));
   for (const application of applications) put(`.aew/profiles/project/${application}.md`, read(join(methodRoot, 'profiles', 'project', `${application}.md`)));
@@ -202,7 +211,7 @@ export function analyze(root) {
 }
 
 export function doctor(root) {
-  const required = ['.aew/SYSTEM.md', '.aew/config.json', '.aew/constitution.md', '.aew/project-brief.md', '.aew/workflows/feature.md', '.aew/workflows/deployment.md', '.aew/routing.md', '.aew/standards/readability.md', '.aew/standards/comments.md', '.aew/standards/engineering-scope.md', '.aew/standards/environment-safety.md', '.aew/standards/progressive-discovery.md', '.aew/stack.json', '.aew/STATE.md', '.aew/TASKS.md', '.aew/DECISIONS.md', '.aew/VALIDATION.md', '.aew/standards/code-organization.md', '.aew/standards/handoff.md', '.aew/HANDOFFS.md', '.aew/ISSUES.md', '.aew/gates.json', '.aew/standards/security.md', '.aew/standards/acceptance.md'];
+  const required = ['.aew/config.json', '.aew/constitution.md', '.aew/project-brief.md', '.aew/workflows/feature.md', '.aew/workflows/deployment.md', '.aew/routing.md', '.aew/standards/readability.md', '.aew/standards/comments.md', '.aew/standards/engineering-scope.md', '.aew/standards/environment-safety.md', '.aew/standards/progressive-discovery.md', '.aew/stack.json', '.aew/STATE.md', '.aew/TASKS.md', '.aew/DECISIONS.md', '.aew/VALIDATION.md', '.aew/standards/code-organization.md', '.aew/standards/handoff.md', '.aew/HANDOFFS.md', '.aew/ISSUES.md', '.aew/gates.json', '.aew/standards/security.md', '.aew/standards/acceptance.md'];
   const missing = required.filter(p => !existsSync(join(root, p)));
   let config;
   if (!missing.includes('.aew/config.json')) {
