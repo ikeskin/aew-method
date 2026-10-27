@@ -150,7 +150,8 @@ export function check(root,{execute=spawnSync,timeoutMs=180000}={}) {
   const commands=inferCheck(root);
   const results=[];
   for (const [command,args] of commands) {
-    const out=execute(command,args,{cwd:root,encoding:'utf8',timeout:timeoutMs,stdio:['ignore','pipe','pipe'],shell:false,maxBuffer:16*1024*1024});
+    const out=execute(command,args,{cwd:root,encoding:'utf8',timeout:timeoutMs,stdio:['ignore','pipe','pipe'],shell:false,maxBuffer:16*1024*1024,
+      env:Object.fromEntries(Object.entries(process.env).filter(([key])=>!key.startsWith('NODE_TEST_')))});
     const timedOut=out.error?.code==='ETIMEDOUT';
     const output=String(out.stdout||'')+'\\n'+String(out.stderr||'');
     const summary=command==='npm'?nodeTestSummary(output):null;
