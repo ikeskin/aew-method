@@ -1,7 +1,9 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { stdin } from 'node:process';
+import { tmpdir } from 'node:os';
+import { createHash } from 'node:crypto';
 import { banner, heading, notice, step, summary, select, multiSelect, askText } from './prompts.js';
 
 const methodRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../method');
@@ -14,6 +16,9 @@ const read = path => readFileSync(path, 'utf8');
 const normalize = x => String(x || '').trim().toLowerCase();
 const markers = { codex: 'AGENTS.md', claude: 'CLAUDE.md', gemini: 'GEMINI.md' };
 const skillRoots = { codex: '.agents/skills', claude: '.claude/skills' };
+const digest = content => createHash('sha256').update(content).digest('hex');
+const managedManifest = '.aew/managed.json';
+const isManagedTemplate = path => path.startsWith('.aew/agents/') || path.startsWith('.aew/standards/') || path.startsWith('.aew/workflows/') || path.startsWith('.aew/profiles/') || ['.aew/SYSTEM.md', '.aew/constitution.md', '.aew/routing.md'].includes(path) || path.includes('/skills/');
 const skillPath = (adapter, role) => `${skillRoots[adapter]}/aew-${role}/SKILL.md`;
 
 
@@ -105,13 +110,65 @@ export function install(root, { adapters = ['codex'], projectType, project = {},
     put(markers[a], adapterContent(a));
     if (skillRoots[a]) for (const role of agents) put(skillPath(a, role), skillContent(role));
   }
+  if (!dryRun && !existsSync(join(root, managedManifest))) {
+    const files = Object.fromEntries(results.filter(r => r.action === 'written' && isManagedTemplate(r.relative)).map(r => [r.relative, digest(read(join(root, r.relative)))]));
+    mkdirSync(join(root, '.aew'), { recursive: true });
+    writeFileSync(join(root, managedManifest), JSON.stringify({ schemaVersion: 1, files }, null, 2) + '\n');
+  }
   return { info, results, config };
+}
+
+
+/** Update only files whose installed checksum still matches the prior managed version. */
+export function upgrade(root, { dryRun = false } = {}) {
+  const manifestPath = join(root, managedManifest);
+  if (!existsSync(manifestPath)) return { ok: false, results: [], errors: ['No managed manifest; legacy files cannot be safely overwritten. Run aew init to add missing files, then review existing templates manually.'] };
+  let manifest;
+  try { manifest = JSON.parse(read(manifestPath)); } catch { return { ok: false, results: [], errors: ['Invalid managed manifest'] }; }
+  if (manifest?.schemaVersion !== 1 || !manifest.files || typeof manifest.files !== 'object') return { ok: false, results: [], errors: ['Invalid managed manifest'] };
+  const config = jsonAt(root, 'config.json');
+  const temp = mkdtempSync(join(tmpdir(), 'aew-upgrade-'));
+  const results = [];
+  try {
+    install(temp, { adapters: config.adapters || ['codex'], projectType: config.projectType, project: config.project || {} });
+    const generated = JSON.parse(read(join(temp, managedManifest))).files;
+    const next = { ...manifest.files };
+    for (const [relative, newHash] of Object.entries(generated)) {
+      if (!isManagedTemplate(relative)) continue;
+      const target = join(root, relative);
+      const oldHash = manifest.files[relative];
+      if (existsSync(target) && !oldHash) { results.push({ relative, action: 'untracked' }); continue; }
+      if (existsSync(target) && digest(read(target)) !== oldHash) { results.push({ relative, action: 'conflict' }); continue; }
+      if (existsSync(target) && digest(read(target)) === newHash) { results.push({ relative, action: 'unchanged' }); next[relative] = newHash; continue; }
+      results.push({ relative, action: dryRun ? 'planned' : 'updated' });
+      if (!dryRun) { mkdirSync(dirname(target), { recursive: true }); writeFileSync(target, read(join(temp, relative))); next[relative] = newHash; }
+    }
+    if (!dryRun) writeFileSync(manifestPath, JSON.stringify({ schemaVersion: 1, files: next }, null, 2) + '\n');
+    return { ok: !results.some(r => ['conflict', 'untracked'].includes(r.action)), results, errors: [] };
+  } finally { rmSync(temp, { recursive: true, force: true }); }
+}
+
+/** One-way, non-destructive migration from shared legacy gates to per-task records. */
+export function migrateTasks(root, { dryRun = false } = {}) {
+  const legacy = jsonAt(root, 'gates.json');
+  if (legacy?.schemaVersion !== 1 || !Array.isArray(legacy.tasks)) throw new Error('Invalid legacy gates schema');
+  const results = [];
+  const ids = new Set();
+  for (const task of legacy.tasks) {
+    if (!task || typeof task.id !== 'string' || !/^AEW-\\d+$/.test(task.id) || ids.has(task.id)) throw new Error('Invalid or duplicate legacy task ID');
+    ids.add(task.id);
+    const relative = `.aew/tasks/${task.id}.json`;
+    if (existsSync(join(root, relative))) { results.push({ relative, action: 'preserved' }); continue; }
+    results.push({ relative, action: dryRun ? 'planned' : 'written' });
+    if (!dryRun) { mkdirSync(dirname(join(root, relative)), { recursive: true }); writeFileSync(join(root, relative), JSON.stringify(task, null, 2) + '\\n'); }
+  }
+  return { ok: true, results, legacyPreserved: true };
 }
 
 function projectBrief(config) {
   const p = config.project;
-  return `# Projectct Brief\n\n- **Projectct type:** ${config.projectType}\n- **Purpose:** ${p.purpose || 'To be clarified before implementation'}\n- **Application:** ${p.application || 'Undecided'}\n- **Technology preference:** ${p.technology || 'Undecided'}\n- **Architecture:** ${p.architecture || 'Prefer the simplest suitable design; validate against actual requirements'}
-- **Projectct profile:** .aew/profiles/project/${applications.includes(p.application) ? p.application : 'other'}.md
+  return `# Project Brief\n\n- **Project type:** ${config.projectType}\n- **Purpose:** ${p.purpose || 'To be clarified before implementation'}\n- **Application:** ${p.application || 'Undecided'}\n- **Technology preference:** ${p.technology || 'Undecided'}\n- **Architecture:** ${p.architecture || 'Prefer the simplest suitable design; validate against actual requirements'}
+- **Project profile:** .aew/profiles/project/${applications.includes(p.application) ? p.application : 'other'}.md
 - **Technology profile:** .aew/profiles/technology/${technologyProfiles.includes(p.technology) ? p.technology : 'generic'}.md\n\n## Engineering guidance\n\n- Establish a minimal plan before scaffolding. Ask for approval only for unresolved high-impact decisions or operations requiring explicit authorization.\n- Ask about missing domain rules and acceptance criteria before implementing features.\n- Avoid speculative abstractions and premature infrastructure.\n- Deployment choices are deferred until deployment requirements exist.\n`;
 }
 
@@ -190,15 +247,20 @@ export function projectStatus(root) {
 export function verify(root, taskId = null) {
   const errors = [];
   let data;
-  try { data = jsonAt(root, 'gates.json'); } catch (error) { return { ok: false, tasks: [], errors: [`Cannot read gates.json: ${error.message}`] }; }
+  try {
+    const dir = join(root, '.aew/tasks');
+    const files = existsSync(dir) ? readdirSync(dir).filter(name => /^AEW-\\d+\\.json$/.test(name)).sort() : [];
+    data = files.length ? { schemaVersion: 1, tasks: files.map(name => JSON.parse(read(join(dir, name)))) } : jsonAt(root, 'gates.json');
+  } catch (error) { return { ok: false, tasks: [], errors: [`Cannot read task records: ${error.message}`] }; }
   if (data?.schemaVersion !== 1 || !Array.isArray(data.tasks)) return { ok: false, tasks: [], errors: ['Invalid gates.json schema'] };
-  const selected = taskId ? data.tasks.filter(t => t.id === taskId) : data.tasks;
+  const selected = taskId ? data.tasks.filter(t => t?.id === taskId) : data.tasks;
   if (taskId && selected.length === 0) errors.push(`Task ${taskId} not found`);
   if (!taskId && selected.length === 0) errors.push('No tasks available for verification');
   const ids = new Set();
   const tasks = selected.map(t => {
     const reasons = [];
     if (!t || typeof t.id !== 'string' || !/^AEW-\d+$/.test(t.id)) reasons.push('invalid task ID');
+    if (!t) return { id: null, ok: false, reasons, verification: 'blocked' };
     if (ids.has(t.id)) reasons.push('duplicate task ID');
     ids.add(t.id);
     if (!['planned','in-progress','qa-pending','rework','verification-blocked','done'].includes(t.status)) reasons.push('invalid task status');
@@ -226,9 +288,9 @@ const option = (args, flag, fallback) => { const i = args.indexOf(flag); return 
 
 async function interview(info, defaults) {
   banner();
-  heading('Projectct setup', 'Start with the project. CI/CD can be configured later.');
+  heading('Project setup', 'Start with the project. CI/CD can be configured later.');
   notice(info.empty ? 'Empty workspace detected' : `Technologies: ${info.tech.join(', ') || 'Not detected yet'}`);
-  step(1, 5, 'Projectct status');
+  step(1, 5, 'Project status');
   const projectType = await select({ title: 'What is the current project status?', options: [
     { label: 'New project', description: 'No source code yet', value: 'new' },
     { label: 'Existing project', description: 'Preserve the existing structure', value: 'existing' },
@@ -240,7 +302,7 @@ async function interview(info, defaults) {
     { label: 'Mobile application', description: 'iOS / Android application', value: 'mobile' }, { label: 'CLI / Developer tool', description: 'Terminal tools and automation', value: 'cli' },
     { label: 'Library / SDK', description: 'Reusable package and public API', value: 'library' }, { label: 'Other / Not decided yet', description: 'Can be decided later', value: 'other' }
   ] });
-  step(3, 5, 'Projectct purpose');
+  step(3, 5, 'Project purpose');
   const purpose = await askText('What is the primary purpose of the project?', { placeholder: 'One short sentence; optional' });
   step(4, 5, 'Technology and architecture');
   const technology = await select({ title: 'What technology do you prefer?', options: [
@@ -265,8 +327,10 @@ async function interview(info, defaults) {
 export async function run(args, root = process.cwd()) {
   const [command = 'help', ...rest] = args;
   if (command === 'help' || args.includes('--help')) {
-    console.log('AEW Method v0.5.8\n  aew init [--yes] [--dry-run] [--adapters codex,claude,gemini]\n  aew analyze [--json]\n  aew inspect\n  aew doctor [--json]\n  aew status\n  aew tasks\n  aew handoffs\n  aew issues\n  aew verify [--json] [--task AEW-001]\n  aew config show\n  aew config set config.output.verbosity concise\n  aew config set stack.technology .NET\n  aew configure'); return;
+    console.log('AEW Method v0.5.8\n  aew init [--yes] [--dry-run] [--adapters codex,claude,gemini]\n  aew analyze [--json]\n  aew inspect\n  aew doctor [--json]\n  aew upgrade [--dry-run]\n  aew migrate-tasks [--dry-run]\n  aew status\n  aew tasks\n  aew handoffs\n  aew issues\n  aew verify [--json] [--task AEW-001]\n  aew config show\n  aew config set config.output.verbosity concise\n  aew config set stack.technology .NET\n  aew configure'); return;
   }
+  if (command === 'upgrade') { const result = upgrade(root, { dryRun: rest.includes('--dry-run') }); console.log(JSON.stringify(result, null, 2)); if (!result.ok) process.exitCode = 1; return; }
+  if (command === 'migrate-tasks') { console.log(JSON.stringify(migrateTasks(root, { dryRun: rest.includes('--dry-run') }), null, 2)); return; }
   if (command === 'verify') { const result = verify(root, option(rest, '--task', null)); if (rest.includes('--json')) console.log(JSON.stringify(result, null, 2)); else { console.log(result.ok ? '✓ AEW recorded gates consistent (NOT independently verified)' : '✗ AEW recorded gates blocked'); for (const item of result.tasks) console.log(`  ${item.id}: ${item.ok ? 'PASS' : 'BLOCKED'}${item.reasons.length ? ' — ' + item.reasons.join('; ') : ''}`); for (const error of result.errors) console.log(`  ERROR: ${error}`); } if (!result.ok) process.exitCode = 1; return; }
   if (command === 'issues') { console.log(read(projectFile(root, 'ISSUES.md'))); return; }
   if (command === 'handoffs') { console.log(read(projectFile(root, 'HANDOFFS.md'))); return; }
@@ -282,8 +346,8 @@ export async function run(args, root = process.cwd()) {
     const report = analyze(root);
     if (rest.includes('--json')) console.log(JSON.stringify(report, null, 2));
     else {
-      heading('AEW · Projectct analysis');
-      console.log(`Technology: ${report.tech.join(', ') || 'Not detected'}\nConfigured technology: ${report.configured?.technology || 'Not specified'}\nProjectct profile: ${report.configured?.application || 'Not specified'}\nWorkspace: ${report.empty ? 'Empty' : 'Existing'}\nCI/CD: ${report.ci}\nTests at root: ${report.testsDetectedAtRoot ? 'Detected' : 'Not detected'}`);
+      heading('AEW · Project analysis');
+      console.log(`Technology: ${report.tech.join(', ') || 'Not detected'}\nConfigured technology: ${report.configured?.technology || 'Not specified'}\nProject profile: ${report.configured?.application || 'Not specified'}\nWorkspace: ${report.empty ? 'Empty' : 'Existing'}\nCI/CD: ${report.ci}\nTests at root: ${report.testsDetectedAtRoot ? 'Detected' : 'Not detected'}`);
       for (const note of report.observations) console.log(`• ${note}`);
       console.log(`\nNote: ${report.limitations.join(' ')}`);
     }
