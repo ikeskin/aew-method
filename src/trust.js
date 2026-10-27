@@ -131,7 +131,7 @@ export function inferCheck(root) {
     const script=pkg.scripts?.test;
     if (script != null) {
       if (!supportedNodeRunner(script)) throw new Error('Unknown or unsafe npm test command; only supported test runners can provide test-count evidence');
-      candidates.push(['npm',['test']]);
+      candidates.push(['npm',/^(?:node|nodejs)\\s+--test/.test(script.trim()) && !script.includes('--test-reporter=tap') ? ['test','--','--test-reporter=tap'] : ['test']]);
     } else if (!candidates.length && !existsSync(join(root,'pyproject.toml')) &&
       !existsSync(join(root,'pytest.ini')) && !existsSync(join(root,'go.mod'))) {
       throw new Error('Missing npm test script; cannot verify tests');
