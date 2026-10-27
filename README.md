@@ -4,7 +4,7 @@
 
 AEW Method is a lightweight, model-agnostic CLI that installs shared engineering instructions, project memory, task tracking, and evidence-oriented QA conventions for AI-assisted development. Designed with independent developers in mind.
 
-> **Beta (v0.5.6).** AEW is an instruction-based workflow, not an autonomous multi-agent runtime, security scanner, or test runner. AI-tool compliance depends on the host tool and context. `aew verify` validates recorded acceptance evidence; it does not execute your test suite.
+> **Beta (v0.5.8).** AEW is an instruction-based workflow, not an autonomous multi-agent runtime, security scanner, or test runner. AI-tool compliance depends on the host tool and context. `aew verify` checks self-reported records only and returns `verification: recorded-only` on success; it does not execute tests or independently approve code.
 
 ## Requirements
 
@@ -54,6 +54,7 @@ AEW provides a set of conventions and files, not guaranteed agent orchestration.
 | `aew doctor [--json]` | Check installation file presence and basic configuration |
 | `aew status`, `aew tasks`, `aew handoffs`, `aew issues` | Display project records |
 | `aew verify [--json] [--task AEW-001]` | Check recorded acceptance and QA gates |
+| `aew config set config.workflow.mode light` | Select light, standard or strict workflow policy |
 | `aew config show` | Inspect configuration |
 | `aew config set stack.technology .NET` | Change a supported configuration value |
 | `aew configure` | Show where configuration can be edited |
