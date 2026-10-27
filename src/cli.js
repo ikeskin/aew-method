@@ -155,7 +155,7 @@ export function doctor(root) {
   const diagnostics = [];
   if (missing.length) diagnostics.push('Installation incomplete: run aew init to add missing files without overwriting existing files.');
   if (config && discover(root).tech.some(t => !config.detected?.includes(t))) diagnostics.push('Detected technologies differ from saved configuration; run aew analyze and review .aew/config.json.');
-  if (config?.projectType === 'new' && !discover(root).empty) diagnostics.push('Project was initialized as new but now contains source files; projectType records the original setup choice.');
+  if (config?.projectType === 'new' && discover(root).tech.length > 0) diagnostics.push('Project was initialized as new but now contains source files; projectType records the original setup choice.');
   return { ok: missing.length === 0, missing, config, diagnostics };
 }
 
