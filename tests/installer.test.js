@@ -176,7 +176,7 @@ test('v0.5.4 installs evidence-based handoff and QA acceptance rules', () => san
   assert.match(handoff, /verification-blocked/);
   assert.match(handoff, /Only after QA `accepted`/);
   assert.match(developer, /HANDOFFS.md/);
-  assert.match(qa, /independently inspect/);
+  assert.match(qa, /only claim independent review/);
   assert.ok(existsSync(join(root, '.aew/HANDOFFS.md')));
   assert.equal(doctor(root).ok, true);
 }));
@@ -444,7 +444,7 @@ test('provider-neutral policy does not require a Git remote or any VCS', () => s
 test('agent cannot obtain LOCAL_PASS from a trivial npm test script', () => sandbox(root => {
   install(root);
   writeFileSync(join(root,'package.json'),JSON.stringify({scripts:{test:'echo ok'}}));
-  assert.throws(()=>localCheck(root,{execute:()=>({status:0,stdout:`TAP version 13\n1..1\n# tests 1\n# pass 1\n# fail 0\n# skipped 0\n`})}),/Trivial npm test script/i);
+  assert.throws(()=>localCheck(root,{execute:()=>({status:0,stdout:`TAP version 13\n1..1\n# tests 1\n# pass 1\n# fail 0\n# skipped 0\n`})}),/unsafe npm test command/i);
 }));
 test('AEW runs checks without trusting task self-approval', () => sandbox(root => {
   install(root);
