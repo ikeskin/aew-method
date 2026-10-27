@@ -1,22 +1,18 @@
-# GitHub trust setup for AEW v0.5.8
+# Optional GitHub CI adapter
 
-AEW's CLI is not a substitute for GitHub repository rules. A passing workflow modified by the author is **not** independent proof.
+AEW does **not** require GitHub, Azure DevOps, Git, SVN, CODEOWNERS, branch rules, or a second developer. The core verification workflow is provider-neutral:
 
-## Configure the repository outside the development branch
+```sh
+aew check
+aew verify
+```
 
-1. Create a ruleset for `main` requiring pull requests and all status checks listed in `.aew/trust-policy.json`. Check names must match the actual GitHub check-run names (including matrix suffixes).
-2. Require the required check workflows to be protected, ideally by using reusable workflows from a separately protected repository/ref. Do not allow a PR author to silently substitute `echo ok` for real tests.
-3. Require code-owner review for critical paths, particularly `.github/workflows/**`, `.github/actions/**`, `.github/CODEOWNERS`, `.aew/**`, `src/trust.js`, agent instructions, and test/dependency manifests. Add a trusted reviewer who is not the author or committer.
-4. Disallow bypass by normal development identities. Limit admin access and audit ruleset changes. CODEOWNERS entries alone **do not** enforce reviews; settings must enforce them.
-5. Protect the base branch and the verification policy from unauthorized changes. Require up-to-date checks after new commits.
+AEW runs built-in real project test commands and reports `LOCAL_PASS` only for successful execution. It reports VCS metadata when available; absence of a VCS is supported. Agent-authored QA statements and historical v1 acceptance records do not constitute independent evidence.
 
-## Evidence contracts
+## Optional GitHub integration
 
-- `aew check`: actually invokes project tests without a shell, on a clean tree, records a SHA-bound `LOCAL_PASS` under Git metadata. Advisory only.
-- `aew verify --ci`: requires authenticated `gh`, a GitHub PR whose head SHA matches the current commit, complete changed-file enumeration, the configured check runs from the `github-actions` app on that SHA, and a commit-current non-bot/non-author approval for critical changes.
-- Missing network, missing `gh`, ambiguous commit author, missing review, missing or failing CI: all BLOCKED.
-- Agent-authored v1 `gates.json` is never accepted. Existing tasks may be copied to v2 records, but historical self-approval does not count.
+Teams that already use GitHub can configure `.aew/trust-policy.json` with their actual required check names and run `aew verify --ci` to additionally validate matching SHA-bound GitHub check results. This integration requires `gh` and Git. It is **not** enabled by default and is **not** necessary for normal AEW use. It does not require CODEOWNERS or human review.
 
-## Limitations
+## Threat-model limit
 
-AEW cannot cryptographically prove that the project tests cover every requirement. The GitHub check-run provenance check does not independently inspect workflow integrity or prove branch rules are enabled. Reusable workflows and repository rules are essential parts of the trust boundary. PRs using GitHub synthetic merge SHAs may need a dedicated head-SHA check workflow: AEW deliberately refuses checks bound only to a different SHA. Azure DevOps integration remains unsupported.
+A local test runner cannot prove that a developer or AI agent has not weakened the tests themselves. `LOCAL_PASS` means the command was executed successfully, not that code has undergone independent review. External protected checks can increase assurance when organizations need it, but AEW never demands that infrastructure from its users.
