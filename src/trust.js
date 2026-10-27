@@ -92,7 +92,7 @@ export function check(root, { execute = spawnSync } = {}) {
   writeFileSync(path, JSON.stringify(evidence,null,2)+'\n');
   return evidence;
 }
-function githubEvidence(root, sha, policy, api = gh) {
+export function githubEvidence(root, sha, policy, api = gh) {
   const repo = repository(root);
   const prs = flat(api(root, `repos/${repo}/pulls?state=open&per_page=100`));
   const pr = prs.find(item => item.head?.sha === sha && item.head?.repo?.full_name === repo);
