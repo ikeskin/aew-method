@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, mkdtem
 import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { stdin } from 'node:process';
+import { check as executeCheck, verifyTrusted } from './trust.js';
 import { tmpdir } from 'node:os';
 import { createHash } from 'node:crypto';
 import { banner, heading, notice, step, summary, select, multiSelect, askText } from './prompts.js';
@@ -115,7 +116,8 @@ export function install(root, { adapters = ['codex'], projectType, project = {},
   put('.aew/standards/handoff.md', read(join(methodRoot, 'standards/handoff.md')));
   put('.aew/HANDOFFS.md', '# AEW Handoffs\n\nRecord role transitions with task ID, owner, evidence, review verdict and next action. No implied approvals.\n');
   put('.aew/ISSUES.md', '# AEW Open Issues\n\nRecord each issue ID, linked task, severity, status, impact, resolution and verification. Keep this narrative synchronized with gates.json.\n');
-  put('.aew/gates.json', JSON.stringify({ schemaVersion: 1, tasks: [] }, null, 2) + '\n');
+  put('.aew/gates.json', JSON.stringify({ schemaVersion: 2, tasks: [] }, null, 2) + '\n');
+  put('.aew/trust-policy.json', JSON.stringify({ schemaVersion: 1, checkNames: ['test (20)', 'test (22)', 'test (24)'], minimumRisk: 'normal' }, null, 2) + '\n');
   for (const standard of ['security', 'acceptance']) put(`.aew/standards/${standard}.md`, read(join(methodRoot, 'standards', `${standard}.md`))); 
   for (const a of selected) {
     put(markers[a], adapterContent(a));
@@ -171,7 +173,7 @@ export function migrateTasks(root, { dryRun = false } = {}) {
     const relative = `.aew/tasks/${task.id}.json`;
     if (existsSync(join(root, relative))) { results.push({ relative, action: 'preserved' }); continue; }
     results.push({ relative, action: dryRun ? 'planned' : 'written' });
-    if (!dryRun) { mkdirSync(dirname(join(root, relative)), { recursive: true }); writeFileSync(join(root, relative), JSON.stringify(task, null, 2) + '\n'); }
+    if (!dryRun) { mkdirSync(dirname(join(root, relative)), { recursive: true }); writeFileSync(join(root, relative), JSON.stringify({ ...task, schemaVersion: 2 }, null, 2) + '\n'); }
   }
   return { ok: true, results, legacyPreserved: true };
 }
@@ -254,45 +256,9 @@ export function projectStatus(root) {
 }
 
 
-// Machine-readable evidence is required: Markdown narratives alone cannot prove QA acceptance.
-export function verify(root, taskId = null) {
-  const errors = [];
-  let data;
-  try {
-    const dir = join(root, '.aew/tasks');
-    const files = existsSync(dir) ? readdirSync(dir).filter(name => /^AEW-\d+\.json$/.test(name)).sort() : [];
-    data = files.length ? { schemaVersion: 1, tasks: files.map(name => JSON.parse(read(join(dir, name)))) } : jsonAt(root, 'gates.json');
-  } catch (error) { return { ok: false, tasks: [], errors: [`Cannot read task records: ${error.message}`] }; }
-  if (data?.schemaVersion !== 1 || !Array.isArray(data.tasks)) return { ok: false, tasks: [], errors: ['Invalid gates.json schema'] };
-  const selected = taskId ? data.tasks.filter(t => t?.id === taskId) : data.tasks;
-  if (taskId && selected.length === 0) errors.push(`Task ${taskId} not found`);
-  if (!taskId && selected.length === 0) errors.push('No tasks available for verification');
-  const ids = new Set();
-  const tasks = selected.map(t => {
-    const reasons = [];
-    if (!t || typeof t.id !== 'string' || !/^AEW-\d+$/.test(t.id)) reasons.push('invalid task ID');
-    if (!t) return { id: null, ok: false, reasons, verification: 'blocked' };
-    if (ids.has(t.id)) reasons.push('duplicate task ID');
-    ids.add(t.id);
-    if (!['planned','in-progress','qa-pending','rework','verification-blocked','done'].includes(t.status)) reasons.push('invalid task status');
-    if (!Array.isArray(t.criteria) || !t.criteria.length) reasons.push('missing acceptance criteria');
-    else for (const c of t.criteria) {
-      if (!c.id || !c.description) reasons.push('criterion missing ID/description');
-      if (c.status !== 'passed' || !c.evidence || typeof c.evidence !== 'string' || !c.evidence.trim()) reasons.push(`${c.id || 'criterion'}: not verified with evidence`);
-    }
-    if (!Array.isArray(t.issues)) reasons.push('missing issue register');
-    else for (const i of t.issues) {
-      if (!i.id || !['critical','high','medium','low'].includes(i.severity) || !['open','resolved','accepted-risk'].includes(i.status)) reasons.push('invalid issue entry');
-      if (i.status === 'open' && (i.blocksAcceptance !== false || ['critical','high'].includes(i.severity))) reasons.push(`${i.id}: blocking open issue`);
-      if (i.status === 'accepted-risk' && (!i.approval || !i.rationale)) reasons.push(`${i.id}: risk acceptance lacks explicit approval and rationale`);
-      if (i.status === 'accepted-risk' && ['critical','high'].includes(i.severity) && !i.approval) reasons.push(`${i.id}: high-risk acceptance requires human approval`);
-      if (i.status === 'resolved' && !i.evidence) reasons.push(`${i.id}: resolution lacks verification evidence`);
-    }
-    if (!t.qa || t.qa.verdict !== 'accepted' || !t.qa.evidence || !String(t.qa.evidence).trim()) reasons.push('QA acceptance evidence missing');
-    if (t.status !== 'done') reasons.push(`task status is ${t.status || 'missing'}, not done`);
-    return { id: t.id, ok: reasons.length === 0, reasons, verification: reasons.length ? 'blocked' : 'recorded-only' };
-  });
-  return { ok: errors.length === 0 && tasks.every(t => t.ok), verification: errors.length || tasks.some(t => !t.ok) ? 'blocked' : 'recorded-only', independentlyVerified: false, tasks, errors };
+// Legacy v1 records are never trusted as a quality gate.
+export function verify(root, taskId = null, options = {}) {
+  return verifyTrusted(root, { taskId, ...options });
 }
 
 const option = (args, flag, fallback) => { const i = args.indexOf(flag); return i >= 0 ? (args[i + 1] || fallback) : fallback; };
@@ -338,11 +304,12 @@ async function interview(info, defaults) {
 export async function run(args, root = process.cwd()) {
   const [command = 'help', ...rest] = args;
   if (command === 'help' || args.includes('--help')) {
-    console.log('AEW Method v0.5.8\n  aew init [--yes] [--dry-run] [--adapters codex,claude,gemini]\n  aew analyze [--json]\n  aew inspect\n  aew doctor [--json]\n  aew upgrade [--dry-run]\n  aew migrate-tasks [--dry-run]\n  aew status\n  aew tasks\n  aew handoffs\n  aew issues\n  aew verify [--json] [--task AEW-001]\n  aew config show\n  aew config set config.output.verbosity concise\n  aew config set stack.technology .NET\n  aew configure'); return;
+    console.log('AEW Method v0.5.8\n  aew init [--yes] [--dry-run] [--adapters codex,claude,gemini]\n  aew analyze [--json]\n  aew inspect\n  aew doctor [--json]\n  aew upgrade [--dry-run]\n  aew migrate-tasks [--dry-run]\n  aew status\n  aew tasks\n  aew handoffs\n  aew issues\n  aew check\n  aew verify [--ci] [--json] [--task AEW-001]\n  aew config show\n  aew config set config.output.verbosity concise\n  aew config set stack.technology .NET\n  aew configure'); return;
   }
   if (command === 'upgrade') { const result = upgrade(root, { dryRun: rest.includes('--dry-run') }); console.log(JSON.stringify(result, null, 2)); if (!result.ok) process.exitCode = 1; return; }
   if (command === 'migrate-tasks') { console.log(JSON.stringify(migrateTasks(root, { dryRun: rest.includes('--dry-run') }), null, 2)); return; }
-  if (command === 'verify') { const result = verify(root, option(rest, '--task', null)); if (rest.includes('--json')) console.log(JSON.stringify(result, null, 2)); else { console.log(result.ok ? '✓ AEW recorded gates consistent (NOT independently verified)' : '✗ AEW recorded gates blocked'); for (const item of result.tasks) console.log(`  ${item.id}: ${item.ok ? 'PASS' : 'BLOCKED'}${item.reasons.length ? ' — ' + item.reasons.join('; ') : ''}`); for (const error of result.errors) console.log(`  ERROR: ${error}`); } if (!result.ok) process.exitCode = 1; return; }
+  if (command === 'check') { const result = executeCheck(root); console.log(JSON.stringify(result, null, 2)); if (result.result !== 'LOCAL_PASS') process.exitCode = 1; return; }
+  if (command === 'verify') { const result = verify(root, option(rest, '--task', null), {ci:rest.includes('--ci')}); if (rest.includes('--json')) console.log(JSON.stringify(result, null, 2)); else { console.log(`${result.ok ? '✓' : '✗'} AEW trust verification: ${result.level} (required ${result.required || 'CI_PASS'})`); for (const error of result.errors) console.log(`  ERROR: ${error}`); } if (!result.ok) process.exitCode = 1; return; }
   if (command === 'issues') { console.log(read(projectFile(root, 'ISSUES.md'))); return; }
   if (command === 'handoffs') { console.log(read(projectFile(root, 'HANDOFFS.md'))); return; }
   if (command === 'status' || command === 'tasks') { const status = projectStatus(root); console.log(command === 'status' ? status.state : status.tasks); return; }
