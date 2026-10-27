@@ -19,7 +19,7 @@ const markers = { codex: 'AGENTS.md', claude: 'CLAUDE.md', gemini: 'GEMINI.md' }
 const skillRoots = { codex: '.agents/skills', claude: '.claude/skills' };
 const digest = content => createHash('sha256').update(content).digest('hex');
 const managedManifest = '.aew/managed.json';
-const isManagedTemplate = path => path.startsWith('.aew/agents/') || path.startsWith('.aew/standards/') || path.startsWith('.aew/workflows/') || path.startsWith('.aew/profiles/') || ['.aew/SYSTEM.md', '.aew/constitution.md', '.aew/routing.md'].includes(path) || path.includes('/skills/');
+const isManagedTemplate = path => path.startsWith('.aew/agents/') || path.startsWith('.aew/standards/') || path.startsWith('.aew/workflows/') || path.startsWith('.aew/profiles/') || ['.aew/SYSTEM.md', '.aew/constitution.md', '.aew/routing.md', '.aew/trust-policy.json'].includes(path) || path.includes('/skills/');
 const skillPath = (adapter, role) => `${skillRoots[adapter]}/aew-${role}/SKILL.md`;
 
 
