@@ -479,7 +479,7 @@ test('trivial node -e and passWithNoTests test commands are rejected', () => san
   install(root);
   for(const cmd of ['node -e 0','jest --passWithNoTests','echo ok']) {
     writeFileSync(join(root,'package.json'),JSON.stringify({scripts:{test:cmd}}));
-    assert.throws(()=>inferCheck(root),/Trivial npm test/);
+    assert.throws(()=>inferCheck(root),/unsafe npm test command/i);
   }
 }));
 test('timeout is configurable and generated test files produce explicit warnings', () => sandbox(root => {
