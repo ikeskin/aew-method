@@ -24,13 +24,13 @@ Use `light` by default: for small tasks, change code, run relevant tests, and re
 - `gates.json`: v2 machine-readable task claims; v1 is not a verification source. Migrate using `aew migrate-tasks` and retain the original file.
 
 ## Execution
-For nontrivial changes in standard or strict mode, identify or create a small task with observable acceptance criteria. Inspect relevant code/tests, choose only necessary roles, implement the smallest complete solution, verify it, and update records at meaningful task boundaries. Trivial changes require no elaborate planning. Never invent requirements, expand scope or refactor unrelated code.
+For nontrivial changes in standard or strict mode, use a single per-task JSON record with observable acceptance criteria; do not write duplicate shared summaries. Inspect relevant code/tests, choose only necessary roles, implement the smallest complete solution, verify it, and update records at meaningful task boundaries. Trivial changes require no elaborate planning. Never invent requirements, expand scope or refactor unrelated code.
 
 ## Engineering quality
 Preserve the existing architecture. Keep entry points such as `Program.cs` focused on composition; separate endpoint, business and persistence concerns when warranted. Prefer clear names, readable expressions and brief comments explaining non-obvious *why*, invariants and security decisions. Do not introduce unnecessary interfaces, layers, libraries or patterns. Simple does not mean monolithic.
 
 ## QA and handoff
-Developer records changed files, acceptance criteria, actual checks, limitations and risks. QA reviews relevant changes and evidence when a separate reviewer is available, checks regression and risk-proportionate security concerns, and records accepted, rework or blocked outcomes. Do not claim independent agent execution unless it occurred.
+Developer records changed files, acceptance criteria, actual checks, limitations and risks only when a tracked task is needed; light mode needs no record updates. QA reviews relevant changes and evidence when a separate reviewer is available, checks regression and risk-proportionate security concerns, and records accepted, rework or blocked outcomes. Do not claim independent agent execution unless it occurred.
 
 A task may be marked `done` by the agent as a claim, never as proof. Legacy gate schema v1 is untrusted. `aew check` and `aew verify` execute actual AEW-selected tests; failed, missing, or trivial test commands cannot pass. `LOCAL_PASS` reports executed local checks and never implies independent review. No GitHub, Azure DevOps, SVN or reviewer is required. External CI may be configured as an additional assurance source. Otherwise use `rework` or `verification-blocked`; never turn `not run` into `passed`. Preserve truthful historical results.
 
