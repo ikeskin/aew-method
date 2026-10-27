@@ -94,10 +94,34 @@ function availablePython() {
   }
   return 'python3';
 }
-function trivialScript(script) {
-  if (typeof script!=='string' || !script.trim()) return true;
-  return /(?:^|[;&|]\s*)(?:echo\b|true\b|exit\s+0\b|:)(?:\s|$)/i.test(script) ||
-    /(?:--passWithNoTests|--pass-with-no-tests|node\s+-e\s+['"]?(?:0|process\.exit\(0\)))/i.test(script);
+function supportedNodeRunner(script) {
+  if (typeof script !== 'string') return false;
+  const normalized=script.trim();
+  // A known test runner is required; arbitrary npm commands do not prove tests ran.
+  if (/^(?:node|nodejs)\\s+--test(?:\\s+--test-reporter=tap)?$/.test(normalized)) return true;
+  if (/^(?:jest|vitest\\s+run|mocha)(?:\\s+--(?:runInBand|ci|reporter=(?:tap|default)))?$/.test(normalized)) return true;
+  return false;
+}
+function nodeTestSummary(output) {
+  const text=String(output||'');
+  const total=text.match(/^# tests\\s+(\\d+)\\s*$/m);
+  const pass=text.match(/^# pass\\s+(\\d+)\\s*$/m);
+  const fail=text.match(/^# fail\\s+(\\d+)\\s*$/m);
+  if (total && pass && fail) return {total:Number(total[1]),passed:Number(pass[1]),failed:Number(fail[1])};
+  // Third-party runners with machine-readable totals when present.
+  const jest=text.match(/Tests:\\s*(?:(\\d+) failed,?\\s*)?(\\d+) passed,?\\s*(\\d+) total/);
+  if (jest) return {total:Number(jest[3]),passed:Number(jest[2]),failed:Number(jest[1]||0)};
+  const vitest=text.match(/Tests\\s+(?:(\\d+) failed\\s*\\|\\s*)?(\\d+) passed\\s*\\((\\d+)\\)/);
+  if (vitest) return {total:Number(vitest[3]),passed:Number(vitest[2]),failed:Number(vitest[1]||0)};
+  const mocha=text.match(/\\b(\\d+) passing\\b/);
+  if (mocha) return {total:Number(mocha[1]),passed:Number(mocha[1]),failed:0};
+  return null;
+}
+function gitTestChanges(root) {
+  try {
+    const files=git(root,'diff-tree','--no-commit-id','--name-only','-r','HEAD').split('\\n').filter(Boolean);
+    return files.filter(path=>/(?:^|\\/)(?:__tests__\\/|tests?\\/)|(?:\\.|_)(?:test|spec)\\.[cm]?[jt]sx?$/.test(path));
+  } catch { return []; }
 }
 export function inferCheck(root) {
   const candidates=[];
@@ -106,7 +130,7 @@ export function inferCheck(root) {
     const pkg=JSON.parse(readFileSync(join(root,'package.json'),'utf8'));
     const script=pkg.scripts?.test;
     if (script != null) {
-      if (trivialScript(script)) throw new Error('Trivial npm test script; cannot verify tests');
+      if (!supportedNodeRunner(script)) throw new Error('Unknown or unsafe npm test command; only supported test runners can provide test-count evidence');
       candidates.push(['npm',['test']]);
     } else if (!candidates.length && !existsSync(join(root,'pyproject.toml')) &&
       !existsSync(join(root,'pytest.ini')) && !existsSync(join(root,'go.mod'))) {
@@ -126,21 +150,33 @@ export function check(root,{execute=spawnSync,timeoutMs=180000}={}) {
   const commands=inferCheck(root);
   const results=[];
   for (const [command,args] of commands) {
-    const out=execute(command,args,{cwd:root,encoding:'utf8',timeout:timeoutMs,stdio:'inherit',shell:false});
+    const out=execute(command,args,{cwd:root,encoding:'utf8',timeout:timeoutMs,stdio:['ignore','pipe','pipe'],shell:false,maxBuffer:16*1024*1024});
     const timedOut=out.error?.code==='ETIMEDOUT';
+    const output=String(out.stdout||'')+'\\n'+String(out.stderr||'');
+    const summary=command==='npm'?nodeTestSummary(output):null;
+    const validCount=command!=='npm' || Boolean(summary && summary.total>0 && summary.passed>0 && summary.failed===0);
+    const passed=out.status===0 && !out.error && validCount;
     results.push({command:[command,...args],exitCode:out.status,signal:out.signal||null,
-      error:out.error?.message||null,timedOut,passed:out.status===0 && !out.error});
+      error:out.error?.message||null,timedOut,testCounts:summary,
+      passed,reason:command==='npm' && !validCount?'No positive test-runner count verified (empty, skipped or unrecognized output)':null});
   }
   const after=vcsContext(root);
   const revisionStable=before.type===after.type && before.revision===after.revision;
   const workingTreeChanged=before.clean===true && after.clean===false;
-  const passed=revisionStable && results.every(x=>x.passed);
+  const changedTests=before.type==='git'?gitTestChanges(root):[];
+  // A newly changed or removed test cannot independently validate itself.
+  // Require a follow-up verification decision rather than returning a green gate.
+  const testIntegrityUnverified=changedTests.length>0;
+  const passed=revisionStable && !testIntegrityUnverified && results.every(x=>x.passed);
   const warnings=[];
   if (workingTreeChanged) warnings.push('Tests left uncommitted/untracked files; inspect git status or svn status and ignore generated output if appropriate');
   if (before.clean===false || after.clean===false) warnings.push('Working tree is dirty; LOCAL_PASS is not evidence for a clean commit');
+  if (changedTests.length) warnings.push('Test files changed in HEAD: '+changedTests.join(', ')+'; test-integrity review required');
   if (results.some(x=>x.timedOut)) warnings.push('Test command timed out; increase --timeout-ms and rerun');
+  if (results.some(x=>x.reason)) warnings.push(...results.filter(x=>x.reason).map(x=>x.reason));
   return {schemaVersion:2,result:passed?'LOCAL_PASS':'UNVERIFIED',source:'executed-by-aew',advisoryOnly:true,
-    vcs:after,sourceChangedDuringRun:!revisionStable,workingTreeChanged,cleanCommitEvidence:passed && before.clean===true && after.clean===true,
+    vcs:after,sourceChangedDuringRun:!revisionStable,workingTreeChanged,changedTests,testIntegrityUnverified,
+    cleanCommitEvidence:passed && before.clean===true && after.clean===true,
     warnings,tests:results};
 }
 export function githubEvidence(root, sha, policy, api = gh) {
