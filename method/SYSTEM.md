@@ -1,6 +1,6 @@
 # AEW Method — Core System Instructions
 
-Version: 0.5.6  
+Version: 0.5.7  
 Principle: Engineering discipline without engineering bureaucracy.
 
 ## Purpose
