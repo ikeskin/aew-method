@@ -266,3 +266,33 @@ test('project brief does not demand approval for every scaffold', () => sandbox(
   assert.match(brief, /minimal plan before scaffolding/);
   assert.doesNotMatch(brief, /without an approved plan/);
 }));
+
+test('v0.5.8 distinguishes recorded evidence from independent verification', () => sandbox(root => {
+  install(root);
+  const task = {id:'AEW-001',status:'done',criteria:[{id:'AC-1',description:'Works',status:'passed',evidence:'tests passed'}],issues:[],qa:{verdict:'accepted',evidence:'self-reported'}};
+  writeFileSync(join(root, '.aew/gates.json'), JSON.stringify({schemaVersion:1,tasks:[task]}));
+  const result = analysisModule.verify(root);
+  assert.equal(result.ok, true);
+  assert.equal(result.verification, 'recorded-only');
+  assert.equal(result.independentlyVerified, false);
+}));
+
+test('v0.5.8 uses light workflow by default and validates workflow mode', () => sandbox(root => {
+  install(root);
+  assert.equal(analysisModule.configShow(root).config.workflow.mode, 'light');
+  assert.equal(analysisModule.configSet(root, 'config.workflow.mode', 'strict'), 'strict');
+  assert.throws(() => analysisModule.configSet(root, 'config.workflow.mode', 'unsafe'), /light, standard or strict/);
+}));
+
+test('v0.5.8 does not install .NET-specific style settings for other stacks', () => sandbox(root => {
+  install(root, {project:{technology:'Python'}});
+  const stack = analysisModule.configShow(root).stack;
+  assert.equal(stack.technology, 'Python');
+  assert.equal(stack.codeStyle.programCs, undefined);
+  assert.equal(stack.codeStyle.comments, 'rationale-and-business-rules');
+}));
+
+test('v0.5.8 preserves .NET style guidance when .NET is selected', () => sandbox(root => {
+  install(root, {project:{technology:'.NET'}});
+  assert.equal(analysisModule.configShow(root).stack.codeStyle.programCs, 'composition-root');
+}));
