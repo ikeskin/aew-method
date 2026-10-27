@@ -71,7 +71,7 @@ description: ${triggers[role]}
 # AEW ${role}
 
 ${triggers[role]}
-Follow .aew/SYSTEM.md and inspect only relevant source, tests, and role guidance.
+Follow .aew/SYSTEM.md and inspect only relevant source, tests, and role guidance; do not preload all AEW documents.
 Roles are responsibilities, not independent agents. Record real test results; never claim an independent review unless one occurred.
 Use light mode without task paperwork for small changes. Use per-task records for tracked work.
 `;
@@ -82,7 +82,7 @@ function adapterContent(adapter) {
   return `# AEW — ${entry}
 
 Read .aew/SYSTEM.md when starting relevant engineering work. Read .aew/STATE.md only if it contains relevant context. Follow the project's existing conventions and the user's instructions.
-Use light mode by default; read additional guidance only when needed. Track larger work in .aew/tasks/<ID>.json.
+Use light mode by default; consult .aew/routing.md only for workflow selection; read additional guidance only when needed. For missing critical dependencies ask specific approval before provisioning; never silently skip essential verification. Track larger work in .aew/tasks/<ID>.json.
 Do not imply independent QA based on self-authored records. Run actual tests and report limitations.
 `;
 }
