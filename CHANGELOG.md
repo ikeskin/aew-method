@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.5.8 — Beta (in development)
+
+- Clarified verification trust: passing recorded gates is not independent QA or CI evidence.
+- Added light/standard/strict workflow mode configuration, defaulting to light.
+- Removed .NET-specific code-style defaults for non-.NET projects.
+- Corrected version and Project typos in generated CLI text.
+
+## 0.5.7 — Beta
+
+- Blocked empty task lists in `aew verify`.
+- Improved nested .NET discovery and installation diagnostics.
+- Replaced blanket scaffold approval with risk-based approval.
+
+
 ## 0.5.6 — Beta
 
 - Added a shared `.aew/SYSTEM.md` operating contract.
