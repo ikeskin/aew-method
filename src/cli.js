@@ -81,7 +81,7 @@ function adapterContent(adapter) {
   const entry = adapter === 'gemini' ? 'Gemini CLI' : adapter === 'claude' ? 'Claude Code' : 'Codex';
   return `# AEW — ${entry}
 
-Read .aew/SYSTEM.md when starting relevant engineering work. Follow the project's existing conventions and the user's instructions.
+Read .aew/SYSTEM.md when starting relevant engineering work. Read .aew/STATE.md only if it contains relevant context. Follow the project's existing conventions and the user's instructions.
 Use light mode by default; read additional guidance only when needed. Track larger work in .aew/tasks/<ID>.json.
 Do not imply independent QA based on self-authored records. Run actual tests and report limitations.
 `;
