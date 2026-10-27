@@ -7,8 +7,8 @@
 
 Apply project and technology profiles plus readability, comment and engineering-scope standards. Avoid unrelated reformatting and scope expansion.
 
-Project continuity: consult `.aew/STATE.md` at start. Record an appropriately sized task in `.aew/TASKS.md`; update state at task boundaries. Append only actual test/build outcomes to `.aew/VALIDATION.md`, and significant accepted design decisions to `.aew/DECISIONS.md`. Apply `.aew/standards/code-organization.md`; tests passing do not waive maintainability review. Avoid unnecessary repeated reads or per-command state writes.
+Project continuity: in light mode use relevant context only; do not create or update shared STATE.md, TASKS.md, gates.json, HANDOFFS.md or VALIDATION.md for a small change. In standard/strict mode, use `.aew/tasks/AEW-<ID>.json` as the authoritative per-task record; update shared summaries only by explicit agreement to avoid branch conflicts. Record consequential decisions only. Follow code-organization guidance; tests passing do not waive maintainability review.
 
-Role transition: follow `.aew/standards/handoff.md`. Developer hands off evidence to QA; QA independently verifies and either accepts, blocks or returns findings. Do not mark a code task done without QA acceptance.
+Role transition: QA is a responsibility, not necessarily a separate agent. Light mode requires no handoff paperwork. For tracked standard/strict work, record actual verification and unresolved risks in the task record; do not claim an independent review unless it happened.
 
-Before declaring done, reconcile criteria and open issues; follow .aew/standards/acceptance.md and .aew/standards/security.md and run aew verify for the task.
+Before declaring verified, report any missing checks, changed tests or risk warnings. Use `aew verify` for actual execution; do not claim automatic enforcement of a verify hook.
