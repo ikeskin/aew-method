@@ -296,3 +296,56 @@ test('v0.5.8 preserves .NET style guidance when .NET is selected', () => sandbox
   install(root, {project:{technology:'.NET'}});
   assert.equal(analysisModule.configShow(root).stack.codeStyle.programCs, 'composition-root');
 }));
+
+test('upgrade updates pristine managed files and protects modified templates', () => sandbox(root => {
+  install(root);
+  const managed = join(root, '.aew', 'SYSTEM.md');
+  writeFileSync(managed, 'custom rules');
+  const dry = analysisModule.upgrade(root, { dryRun: true });
+  assert.equal(dry.ok, false);
+  assert.ok(dry.results.some(x => x.relative === '.aew/SYSTEM.md' && x.action === 'conflict'));
+  assert.equal(readFileSync(managed, 'utf8'), 'custom rules');
+  const run = analysisModule.upgrade(root);
+  assert.equal(run.ok, false);
+  assert.equal(readFileSync(managed, 'utf8'), 'custom rules');
+}));
+
+test('upgrade reports legacy installations without manifest safely', () => sandbox(root => {
+  install(root);
+  rmSync(join(root, '.aew', 'managed.json'));
+  const result = analysisModule.upgrade(root);
+  assert.equal(result.ok, false);
+  assert.match(result.errors.join(' '), /legacy files/);
+}));
+
+test('migrated task files override legacy shared gates without deleting them', () => sandbox(root => {
+  install(root);
+  const task = {id:'AEW-001',status:'done',criteria:[{id:'AC-1',description:'Done',status:'passed',evidence:'log'}],issues:[],qa:{verdict:'accepted',evidence:'review'}};
+  const legacy = join(root, '.aew', 'gates.json');
+  writeFileSync(legacy, JSON.stringify({schemaVersion:1,tasks:[task]}));
+  const result = analysisModule.migrateTasks(root);
+  assert.equal(result.ok, true);
+  assert.ok(existsSync(join(root, '.aew/tasks/AEW-001.json')));
+  assert.equal(analysisModule.verify(root).ok, true);
+  task.status = 'rework';
+  writeFileSync(legacy, JSON.stringify({schemaVersion:1,tasks:[task]}));
+  assert.equal(analysisModule.verify(root).ok, true);
+}));
+
+test('migration dry-run does not write task files', () => sandbox(root => {
+  install(root);
+  const legacy = join(root, '.aew', 'gates.json');
+  writeFileSync(legacy, JSON.stringify({schemaVersion:1,tasks:[{id:'AEW-001'}]}));
+  const result = analysisModule.migrateTasks(root, {dryRun:true});
+  assert.equal(result.results[0].action, 'planned');
+  assert.equal(existsSync(join(root, '.aew/tasks/AEW-001.json')), false);
+}));
+
+test('adapter skill descriptions contain concrete triggers', () => sandbox(root => {
+  install(root, {adapters:['codex','claude','gemini']});
+  const skill = readFileSync(join(root, '.claude/skills/aew-qa/SKILL.md'), 'utf8');
+  assert.match(skill, /Review acceptance evidence/);
+  assert.doesNotMatch(skill, /explicit \$aew-qa/);
+  const gemini = readFileSync(join(root, 'GEMINI.md'), 'utf8');
+  assert.match(gemini, /Gemini CLI/);
+}));
