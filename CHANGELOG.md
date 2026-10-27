@@ -1,6 +1,12 @@
 # Changelog
 
-## 0.5.8 — Beta (in development)
+## 0.5.9 — Context optimization (in development)
+
+- Reduced always-loaded Codex, Claude and Gemini bootstrap instructions to universal guardrails.
+- Moved detailed role procedures to lazy-loaded skills; newly installed projects do not require `.aew/SYSTEM.md`.
+- Added repeatable stream-json usage benchmark and context-budget documentation; no mandatory hooks.
+
+## 0.5.8 — Beta
 
 - Added checksum-based `aew upgrade` with dry-run and conflict preservation; legacy untracked files are never overwritten.
 - Added non-destructive `aew migrate-tasks` and per-task verification records.
