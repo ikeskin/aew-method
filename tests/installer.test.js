@@ -412,7 +412,7 @@ test('aew check uses a real subprocess interface and only clean commit yields LO
   const result=localCheck(root,{execute:(cmd,args,options)=>{invoked={cmd,args,options};return {status:0,stdout:`TAP version 13\n1..1\n# tests 1\n# pass 1\n# fail 0\n# skipped 0\n`};}});
   assert.equal(result.result,'LOCAL_PASS');
   assert.equal(invoked.cmd,'npm');
-  assert.deepEqual(invoked.args,['test']);
+  assert.deepEqual(invoked.args,['test','--','--test-reporter=tap']);
   assert.equal(invoked.options.shell,false);
   writeFileSync(join(root,'scratch.tmp'),'dirty');
   const dirty=localCheck(root,{execute:()=>({status:0,stdout:`TAP version 13\n1..1\n# tests 1\n# pass 1\n# fail 0\n# skipped 0\n`})});
@@ -439,7 +439,7 @@ test('provider-neutral policy does not require a Git remote or any VCS', () => s
   assert.equal(result.result,'LOCAL_PASS');
   assert.equal(result.vcs.type,'none');
   assert.equal(result.vcs.revision,null);
-  assert.deepEqual(commands,[['npm','test']]);
+  assert.deepEqual(commands,[['npm','test','--','--test-reporter=tap']]);
 }));
 test('agent cannot obtain LOCAL_PASS from a trivial npm test script', () => sandbox(root => {
   install(root);
@@ -473,7 +473,7 @@ test('recursive dotnet discovery ignores node_modules, bin and obj', () => sandb
     writeFileSync(join(root,dir,'nested','Fake.csproj'),'<Project/>');
   }
   writeFileSync(join(root,'package.json'),JSON.stringify({scripts:{test:'node --test'}}));
-  assert.deepEqual(inferCheck(root),[['npm',['test']]]);
+  assert.deepEqual(inferCheck(root),[['npm',['test','--','--test-reporter=tap']]]);
 }));
 test('trivial node -e and passWithNoTests test commands are rejected', () => sandbox(root => {
   install(root);
