@@ -22,7 +22,7 @@ aew init --yes --adapters codex,claude,gemini
 aew doctor
 ```
 
-For an interactive setup, run `aew init` in a terminal. The installer preserves existing agent instructions and project files rather than overwriting them.
+For an interactive setup, run `aew init` in a terminal. The installer preserves existing agent instructions and project files rather than overwriting them. New installations track checksums for managed templates; use `aew upgrade --dry-run` before updating. Legacy installations without a manifest require manual review and are never overwritten automatically.
 
 After initialization, open the project in your preferred AI coding tool and request a normal engineering task. The adapter entrypoint directs the agent to `.aew/SYSTEM.md`, the shared operating contract.
 
@@ -49,6 +49,8 @@ AEW provides a set of conventions and files, not guaranteed agent orchestration.
 | Command | Purpose |
 | --- | --- |
 | `aew init [--yes] [--dry-run] [--adapters codex,claude,gemini]` | Install project instructions and state files |
+| `aew upgrade [--dry-run]` | Safely update unmodified AEW-managed templates; report conflicts without overwriting edits |
+| `aew migrate-tasks [--dry-run]` | Copy legacy gates into per-task JSON files, preserving original gates.json |
 | `aew analyze [--json]` | Shallow static project discovery |
 | `aew inspect` | Print detected project information |
 | `aew doctor [--json]` | Check installation file presence and basic configuration |
@@ -78,3 +80,7 @@ npm run pack:check
 ## License
 
 [MIT](LICENSE). This repository is independently developed and is not affiliated with any AI tool provider.
+
+## Task migration
+
+For existing projects, run `aew migrate-tasks --dry-run`, then `aew migrate-tasks`. This copies legacy `gates.json` tasks into `.aew/tasks/AEW-<ID>.json`, preserving the original file. Once task files exist, `aew verify` reads task files rather than the shared legacy gate. Do not edit both representations. For untracked legacy template files, `aew upgrade` reports the limitation rather than overwriting custom changes.
