@@ -4,7 +4,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import * as analysisModule from '../src/cli.js';
-import { classifyRisk, githubEvidence, verifyTrusted, check as localCheck } from '../src/trust.js';
+import { classifyRisk, githubEvidence, verifyTrusted, inferCheck, check as localCheck } from '../src/trust.js';
 import { execFileSync } from 'node:child_process';
 const { discover, install, doctor } = analysisModule;
 
@@ -328,6 +328,10 @@ test('migrated task files override legacy shared gates without deleting them', (
   const result = analysisModule.migrateTasks(root);
   assert.equal(result.ok, true);
   assert.ok(existsSync(join(root, '.aew/tasks/AEW-001.json')));
+  const migrated=JSON.parse(readFileSync(join(root,'.aew/tasks/AEW-001.json'),'utf8'));
+  assert.equal(migrated.status,'planned');
+  assert.equal(migrated.qa.verdict,'pending');
+  assert.equal(migrated.criteria[0].status,'pending');
   assert.equal(analysisModule.verify(root).ok, false);
   task.status = 'rework';
   writeFileSync(legacy, JSON.stringify({schemaVersion:1,tasks:[task]}));
@@ -453,4 +457,53 @@ test('AEW runs checks without trusting task self-approval', () => sandbox(root =
   assert.equal(passed.ok,true);
   assert.equal(passed.level,'LOCAL_PASS');
   assert.equal(passed.independentApproval,false);
+}));
+
+test('polyglot tooling-only package.json does not block dotnet tests', () => sandbox(root => {
+  install(root);
+  mkdirSync(join(root,'src'),{recursive:true});
+  writeFileSync(join(root,'src','App.csproj'),'<Project/>');
+  writeFileSync(join(root,'package.json'),JSON.stringify({scripts:{build:'vite build'}}));
+  assert.deepEqual(inferCheck(root),[['dotnet',['test']]]);
+}));
+test('recursive dotnet discovery ignores node_modules, bin and obj', () => sandbox(root => {
+  install(root);
+  for(const dir of ['node_modules','bin','obj']) {
+    mkdirSync(join(root,dir,'nested'),{recursive:true});
+    writeFileSync(join(root,dir,'nested','Fake.csproj'),'<Project/>');
+  }
+  writeFileSync(join(root,'package.json'),JSON.stringify({scripts:{test:'node --test'}}));
+  assert.deepEqual(inferCheck(root),[['npm',['test']]]);
+}));
+test('trivial node -e and passWithNoTests test commands are rejected', () => sandbox(root => {
+  install(root);
+  for(const cmd of ['node -e 0','jest --passWithNoTests','echo ok']) {
+    writeFileSync(join(root,'package.json'),JSON.stringify({scripts:{test:cmd}}));
+    assert.throws(()=>inferCheck(root),/Trivial npm test/);
+  }
+}));
+test('timeout is configurable and generated test files produce explicit warnings', () => sandbox(root => {
+  install(root);
+  writeFileSync(join(root,'package.json'),JSON.stringify({scripts:{test:'node --test'}}));
+  committed(root);
+  const outcome=localCheck(root,{timeoutMs:360000,execute:()=>{
+    writeFileSync(join(root,'coverage.tmp'),'generated');
+    return {status:0};
+  }});
+  assert.equal(outcome.result,'LOCAL_PASS');
+  assert.equal(outcome.cleanCommitEvidence,false);
+  assert.equal(outcome.workingTreeChanged,true);
+  assert.match(outcome.warnings.join(' '),/Tests left uncommitted/);
+  const failed=localCheck(root,{timeoutMs:1000,execute:()=>({status:null,error:{code:'ETIMEDOUT',message:'timed out'}})});
+  assert.equal(failed.result,'UNVERIFIED');
+  assert.match(failed.warnings.join(' '),/timed out/);
+}));
+test('optional GitHub check verifies SHA after merge without an open PR', () => sandbox(root => {
+  install(root); const sha=committed(root);
+  const policy={checkNames:['test (20)']};
+  const api=(r,p)=>p.includes('pulls?')?[[]]:p.includes('check-runs?')?[{check_runs:[{name:'test (20)',head_sha:sha,app:{slug:'github-actions'},conclusion:'success'}]}]:[[]];
+  const result=githubEvidence(root,sha,policy,api);
+  assert.equal(result.level,'CI_PASS');
+  assert.equal(result.risk.risk,'unknown');
+  assert.match(result.risk.warning,/No open PR/);
 }));
