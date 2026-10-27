@@ -5,7 +5,7 @@
 - Added checksum-based `aew upgrade` with dry-run and conflict preservation; legacy untracked files are never overwritten.
 - Added non-destructive `aew migrate-tasks` and per-task verification records.
 - Simplified adapter instructions and made role-skill triggers concrete.
-- Introduced v2 fail-closed gates and UNVERIFIED / LOCAL_PASS / CI_PASS / REVIEWED trust levels.
+- Introduced v2 fail-closed gates and UNVERIFIED / LOCAL_PASS / CI_PASS trust levels.
 - Made real locally executed test policy the default without requiring GitHub, Git, SVN, Azure DevOps, CODEOWNERS, or a second reviewer.
 - Retained optional SHA-bound GitHub CI integration; critical paths are advisory rather than mandatory review gates.
 - Clarified verification trust: passing recorded gates is not independent QA or CI evidence.
