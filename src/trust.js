@@ -1,8 +1,8 @@
 import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, readFileSync, mkdirSync, writeFileSync, readdirSync } from 'node:fs';
-import { join, resolve, dirname } from 'node:path';
+import { join } from 'node:path';
 
-const levels = ['UNVERIFIED', 'LOCAL_PASS', 'CI_PASS', 'REVIEWED'];
+const levels = ['UNVERIFIED', 'LOCAL_PASS', 'CI_PASS'];
 const criticalMatchers = [
   /^\.github\/(?:workflows\/|actions\/|CODEOWNERS$)/i,
   /(?:^|\/)CODEOWNERS$/i,
@@ -71,52 +71,89 @@ function vcsContext(root) {
     } catch { return {type:'none',revision:null,clean:null}; }
   }
 }
+const excludedDirs = new Set(['node_modules','bin','obj','.git','.aew','.svn','dist','build','coverage','TestResults']);
 function isDotnet(root) {
-  const candidates=['.', 'src','tests'];
-  return candidates.some(dir=> {
-    const p=join(root,dir);
-    if (!existsSync(p)) return false;
-    try { return readdirSync(p,{recursive:true}).some(name=>/\.(?:slnx?|csproj)$/.test(name)); }
-    catch { return false; }
-  });
+  const scan = (dir, depth = 0) => {
+    if (depth > 12) return false;
+    try {
+      for (const entry of readdirSync(dir, {withFileTypes:true})) {
+        if (entry.isFile() && /\\.(?:slnx?|csproj)$/.test(entry.name)) return true;
+        if (entry.isDirectory() && !excludedDirs.has(entry.name) && scan(join(dir,entry.name),depth+1)) return true;
+      }
+    } catch { /* unreadable paths cannot be inferred */ }
+    return false;
+  };
+  return scan(root);
+}
+function availablePython() {
+  for (const cmd of ['python3','python']) {
+    try {
+      const r=spawnSync(cmd,['--version'],{encoding:'utf8',timeout:3000,stdio:'ignore'});
+      if (r.status===0) return cmd;
+    } catch { /* try alternative */ }
+  }
+  return 'python3';
+}
+function trivialScript(script) {
+  if (typeof script!=='string' || !script.trim()) return true;
+  return /(?:^|[;&|]\\s*)(?:echo\\b|true\\b|exit\\s+0\\b|:)(?:\\s|$)/i.test(script) ||
+    /(?:--passWithNoTests|--pass-with-no-tests|node\\s+-e\\s+['"]?(?:0|process\\.exit\\(0\\)))/i.test(script);
 }
 export function inferCheck(root) {
-  // Fixed built-in commands: agent-editable configuration never directly supplies an executable.
   const candidates=[];
   if (isDotnet(root)) candidates.push(['dotnet',['test']]);
   if (existsSync(join(root,'package.json'))) {
     const pkg=JSON.parse(readFileSync(join(root,'package.json'),'utf8'));
     const script=pkg.scripts?.test;
-    if (!script || /^\s*(?:echo\b|true\b|exit\s+0\b|:)\s*/i.test(script))
-      throw new Error('Missing or trivial npm test script; cannot verify tests');
-    candidates.push(['npm',['test']]);
+    if (script != null) {
+      if (trivialScript(script)) throw new Error('Trivial npm test script; cannot verify tests');
+      candidates.push(['npm',['test']]);
+    } else if (!candidates.length && !existsSync(join(root,'pyproject.toml')) &&
+      !existsSync(join(root,'pytest.ini')) && !existsSync(join(root,'go.mod'))) {
+      throw new Error('Missing npm test script; cannot verify tests');
+    }
   }
   if (existsSync(join(root,'pyproject.toml')) || existsSync(join(root,'pytest.ini')))
-    candidates.push(['python',['-m','pytest']]);
+    candidates.push([availablePython(),['-m','pytest']]);
   if (existsSync(join(root,'go.mod'))) candidates.push(['go',['test','./...']]);
   if (!candidates.length) throw new Error('No supported test project detected. Cannot claim verification.');
-  // Use all detected ecosystems in polyglot repositories.
   return candidates;
 }
-export function check(root,{execute=spawnSync}={}) {
+export function check(root,{execute=spawnSync,timeoutMs=180000}={}) {
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs<1000 || timeoutMs>3600000)
+    throw new Error('Test timeout must be between 1000 and 3600000 ms');
   const before=vcsContext(root);
   const commands=inferCheck(root);
   const results=[];
   for (const [command,args] of commands) {
-    const out=execute(command,args,{cwd:root,encoding:'utf8',timeout:180000,stdio:'inherit',shell:false});
-    results.push({command:[command,...args],exitCode:out.status,signal:out.signal||null,error:out.error?.message||null,passed:out.status===0 && !out.error});
+    const out=execute(command,args,{cwd:root,encoding:'utf8',timeout:timeoutMs,stdio:'inherit',shell:false});
+    const timedOut=out.error?.code==='ETIMEDOUT';
+    results.push({command:[command,...args],exitCode:out.status,signal:out.signal||null,
+      error:out.error?.message||null,timedOut,passed:out.status===0 && !out.error});
   }
   const after=vcsContext(root);
-  const stable=before.type===after.type && before.revision===after.revision && before.clean===after.clean;
-  const passed=stable && results.every(x=>x.passed);
+  const revisionStable=before.type===after.type && before.revision===after.revision;
+  const workingTreeChanged=before.clean===true && after.clean===false;
+  const passed=revisionStable && results.every(x=>x.passed);
+  const warnings=[];
+  if (workingTreeChanged) warnings.push('Tests left uncommitted/untracked files; inspect git status or svn status and ignore generated output if appropriate');
+  if (before.clean===false || after.clean===false) warnings.push('Working tree is dirty; LOCAL_PASS is not evidence for a clean commit');
+  if (results.some(x=>x.timedOut)) warnings.push('Test command timed out; increase --timeout-ms and rerun');
   return {schemaVersion:2,result:passed?'LOCAL_PASS':'UNVERIFIED',source:'executed-by-aew',advisoryOnly:true,
-    vcs:after,sourceChangedDuringRun:!stable,tests:results};
+    vcs:after,sourceChangedDuringRun:!revisionStable,workingTreeChanged,cleanCommitEvidence:passed && before.clean===true && after.clean===true,
+    warnings,tests:results};
 }
 export function githubEvidence(root, sha, policy, api = gh) {
   const repo = repository(root);
   const prs = flat(api(root, `repos/${repo}/pulls?state=open&per_page=100`));
   const pr = prs.find(item => item.head?.sha === sha && item.head?.repo?.full_name === repo);
-  if (!pr) throw new Error('No open PR matching HEAD commit');
+  // Merge commits without an open PR can still be verified using SHA-bound CI results.
+  if (!pr) {
+    const checks = flat(api(root, `repos/${repo}/commits/${sha}/check-runs?per_page=100`)).flatMap(x=>x.check_runs||[]);
+    const trusted=checks.filter(run=>policy.checkNames.includes(run.name) && run.head_sha===sha && run.app?.slug==='github-actions' && run.conclusion==='success');
+    if (!policy.checkNames.every(name=>trusted.some(c=>c.name===name))) throw new Error('Trusted CI check not successful for HEAD');
+    return {level:'CI_PASS',risk:{risk:'unknown',criticalPaths:[],warning:'No open PR: critical paths cannot be evaluated from PR diff'},pr:null};
+  }
   // Full server-side PR diff is mandatory. Any API failure or truncation blocks verification.
   const files = flat(api(root, `repos/${repo}/pulls/${pr.number}/files?per_page=100`));
   if (!files.length || files.length >= 3000 || files.some(f => !f.filename)) throw new Error('Incomplete PR file list');
@@ -127,7 +164,7 @@ export function githubEvidence(root, sha, policy, api = gh) {
   // Host-provided CI evidence is optional; risk findings are advisory, not an approval gate.
   return {level:'CI_PASS',risk,pr:pr.number};
 }
-export function verifyTrusted(root,{taskId=null,ci=false,github=githubEvidence,execute=spawnSync}={}) {
+export function verifyTrusted(root,{taskId=null,ci=false,github=githubEvidence,execute=spawnSync,timeoutMs=180000}={}) {
   const errors=[];
   let tasks=[];
   const hasTasks=existsSync(join(root,'.aew','gates.json')) ||
@@ -149,7 +186,7 @@ export function verifyTrusted(root,{taskId=null,ci=false,github=githubEvidence,e
   } else if (taskId) errors.push('No task records available');
   let evidence=null,level='UNVERIFIED',risk=null,revision=null;
   try {
-    evidence=check(root,{execute});
+    evidence=check(root,{execute,timeoutMs});
     revision=evidence.vcs.revision;
     if (evidence.result==='LOCAL_PASS') level='LOCAL_PASS';
     else errors.push('Required local test execution did not pass');
