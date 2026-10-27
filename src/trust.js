@@ -71,14 +71,21 @@ function localEvidence(root, sha) {
     evidence.sha === sha && evidence.clean === true && clean(root);
 }
 function inferCheck(root) {
-  const files = ['package.json', 'pyproject.toml', 'go.mod'];
+  let preferred = '';
+  try { preferred = JSON.parse(readFileSync(join(root, '.aew/stack.json'), 'utf8')).technology || ''; } catch { /* fall back to manifest detection */ }
+  const dotnet = () => {
+    const atRoot = readdirSync(root).some(name => /\\.(?:slnx?|csproj)$/.test(name));
+    const nested = ['src', 'tests'].some(dir => existsSync(join(root, dir)) &&
+      readdirSync(join(root, dir), {recursive:true}).some(name => /\\.(?:slnx?|csproj)$/.test(name)));
+    return atRoot || nested;
+  };
+  if (preferred === '.NET' && dotnet()) return ['dotnet', ['test']];
+  if (preferred === 'Python' && existsSync(join(root, 'pyproject.toml'))) return ['python', ['-m', 'pytest']];
+  if (preferred === 'Go' && existsSync(join(root, 'go.mod'))) return ['go', ['test', './...']];
   if (existsSync(join(root, 'package.json'))) return ['npm', ['test']];
   if (existsSync(join(root, 'pyproject.toml'))) return ['python', ['-m', 'pytest']];
   if (existsSync(join(root, 'go.mod'))) return ['go', ['test', './...']];
-  if (existsSync(join(root, 'src'))) {
-    const candidates = readdirSync(join(root, 'src'), {recursive:true}).filter(p => /\.slnx?$/.test(p));
-    if (candidates.length) return ['dotnet', ['test']];
-  }
+  if (dotnet()) return ['dotnet', ['test']];
   throw new Error('No recognized test command. Define tests through a reviewed project configuration.');
 }
 export function check(root, { execute = spawnSync } = {}) {
@@ -101,7 +108,7 @@ export function githubEvidence(root, sha, policy, api = gh) {
   if (!pr) throw new Error('No open PR matching HEAD commit');
   // Full server-side PR diff is mandatory. Any API failure or truncation blocks verification.
   const files = flat(api(root, `repos/${repo}/pulls/${pr.number}/files?per_page=100`));
-  if (!files.length || files.some(f => !f.filename)) throw new Error('Incomplete PR file list');
+  if (!files.length || files.length >= 3000 || files.some(f => !f.filename)) throw new Error('Incomplete PR file list');
   const risk = classifyRisk(files.map(f => f.filename), policy.minimumRisk);
   const checks = flat(api(root, `repos/${repo}/commits/${sha}/check-runs?per_page=100`)).flatMap(x => x.check_runs || []);
   const matches = checks.filter(run => policy.checkNames.includes(run.name) && run.head_sha === sha && run.app?.slug === 'github-actions' && run.conclusion === 'success');
