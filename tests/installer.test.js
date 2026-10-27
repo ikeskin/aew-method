@@ -386,14 +386,14 @@ test('GitHub evidence rejects wrong-commit CI checks and untrusted applications'
   const wrongApp=(r,p)=>p.includes('/check-runs?')?[{check_runs:[{name:'test (20)',head_sha:sha,app:{slug:'untrusted-app'},conclusion:'success'}]}]:api(r,p);
   assert.throws(()=>githubEvidence(root,sha,policy,wrongApp),/not successful/);
 }));
-test('GitHub critical changes require current human review, not bot or author', () => sandbox(root => {
+test('optional GitHub CI reports risk without requiring a second human reviewer', () => sandbox(root => {
   install(root); const sha=committed(root);
   const pr={number:2,head:{sha,repo:{full_name:'ikeskin/aew-method'}},user:{login:'author'}};
   const policy={checkNames:['test (20)'],minimumRisk:'normal'};
   const api=(r,p)=>p.includes('pulls?')?[[pr]]:p.includes('/files?')?[[{filename:'.github/workflows/ci.yml'}]]:p.includes('/check-runs?')?[{check_runs:[{name:'test (20)',head_sha:sha,app:{slug:'github-actions'},conclusion:'success'}]}]:p.includes('/commits/')?[{author:{login:'commit-author'}}]:p.includes('/reviews?')?[[{id:1,state:'APPROVED',commit_id:sha,user:{type:'Bot',login:'review[bot]'}}]]:[[]];
   assert.equal(githubEvidence(root,sha,policy,api).level,'CI_PASS');
   const human=(r,p)=>p.includes('/reviews?')?[[{id:2,state:'APPROVED',commit_id:sha,user:{type:'User',login:'reviewer'}}]]:api(r,p);
-  assert.equal(githubEvidence(root,sha,policy,human).level,'REVIEWED');
+  assert.equal(githubEvidence(root,sha,policy,human).level,'CI_PASS');
   const stale=(r,p)=>p.includes('/reviews?')?[[{id:2,state:'APPROVED',commit_id:'stale',user:{type:'User',login:'reviewer'}}]]:api(r,p);
   assert.equal(githubEvidence(root,sha,policy,stale).level,'CI_PASS');
   const author=(r,p)=>p.includes('/reviews?')?[[{id:3,state:'APPROVED',commit_id:sha,user:{type:'User',login:'commit-author'}}]]:api(r,p);
