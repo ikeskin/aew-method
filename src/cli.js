@@ -173,7 +173,7 @@ export function migrateTasks(root, { dryRun = false } = {}) {
     const relative = `.aew/tasks/${task.id}.json`;
     if (existsSync(join(root, relative))) { results.push({ relative, action: 'preserved' }); continue; }
     results.push({ relative, action: dryRun ? 'planned' : 'written' });
-    if (!dryRun) { mkdirSync(dirname(join(root, relative)), { recursive: true }); writeFileSync(join(root, relative), JSON.stringify({ ...task, schemaVersion: 2 }, null, 2) + '\n'); }
+    if (!dryRun) { mkdirSync(dirname(join(root, relative)), { recursive: true }); writeFileSync(join(root, relative), JSON.stringify({ ...task, schemaVersion: 2, status: 'planned', qa: { verdict: 'pending', evidence: null }, criteria: Array.isArray(task.criteria) ? task.criteria.map(c => ({ ...c, status: 'pending', evidence: null })) : task.criteria }, null, 2) + '\n'); }
   }
   return { ok: true, results, legacyPreserved: true };
 }
@@ -304,12 +304,12 @@ async function interview(info, defaults) {
 export async function run(args, root = process.cwd()) {
   const [command = 'help', ...rest] = args;
   if (command === 'help' || args.includes('--help')) {
-    console.log('AEW Method v0.5.8\n  aew init [--yes] [--dry-run] [--adapters codex,claude,gemini]\n  aew analyze [--json]\n  aew inspect\n  aew doctor [--json]\n  aew upgrade [--dry-run]\n  aew migrate-tasks [--dry-run]\n  aew status\n  aew tasks\n  aew handoffs\n  aew issues\n  aew check\n  aew verify [--json] [--task AEW-001] [--ci (optional GitHub)]\n  aew config show\n  aew config set config.output.verbosity concise\n  aew config set stack.technology .NET\n  aew configure'); return;
+    console.log('AEW Method v0.5.8\n  aew init [--yes] [--dry-run] [--adapters codex,claude,gemini]\n  aew analyze [--json]\n  aew inspect\n  aew doctor [--json]\n  aew upgrade [--dry-run]\n  aew migrate-tasks [--dry-run]\n  aew status\n  aew tasks\n  aew handoffs\n  aew issues\n  aew check [--timeout-ms 180000]\n  aew verify [--json] [--task AEW-001] [--timeout-ms 180000] [--ci (optional GitHub)]\n  aew config show\n  aew config set config.output.verbosity concise\n  aew config set stack.technology .NET\n  aew configure'); return;
   }
   if (command === 'upgrade') { const result = upgrade(root, { dryRun: rest.includes('--dry-run') }); console.log(JSON.stringify(result, null, 2)); if (!result.ok) process.exitCode = 1; return; }
   if (command === 'migrate-tasks') { console.log(JSON.stringify(migrateTasks(root, { dryRun: rest.includes('--dry-run') }), null, 2)); return; }
-  if (command === 'check') { const result = executeCheck(root); console.log(JSON.stringify(result, null, 2)); if (result.result !== 'LOCAL_PASS') process.exitCode = 1; return; }
-  if (command === 'verify') { const result = verify(root, option(rest, '--task', null), {ci:rest.includes('--ci')}); if (rest.includes('--json')) console.log(JSON.stringify(result, null, 2)); else { console.log(`${result.ok ? '✓' : '✗'} AEW trust verification: ${result.level} (required ${result.required || 'CI_PASS'})`); for (const error of result.errors) console.log(`  ERROR: ${error}`); } if (!result.ok) process.exitCode = 1; return; }
+  if (command === 'check') { const result = executeCheck(root, {timeoutMs: Number(option(rest,'--timeout-ms','180000'))}); console.log(JSON.stringify(result, null, 2)); if (result.result !== 'LOCAL_PASS') process.exitCode = 1; return; }
+  if (command === 'verify') { const result = verify(root, option(rest, '--task', null), {ci:rest.includes('--ci'),timeoutMs:Number(option(rest,'--timeout-ms','180000'))}); if (rest.includes('--json')) console.log(JSON.stringify(result, null, 2)); else { console.log(`${result.ok ? '✓' : '✗'} AEW trust verification: ${result.level} (required ${result.required || 'CI_PASS'})`); for (const error of result.errors) console.log(`  ERROR: ${error}`); for (const warning of result.evidence?.warnings || []) console.log(`  WARNING: ${warning}`); if (result.risk?.criticalPaths?.length) console.log(`  WARNING: critical changed paths: ${result.risk.criticalPaths.join(', ')}`); if (result.risk?.warning) console.log(`  WARNING: ${result.risk.warning}`); } if (!result.ok) process.exitCode = 1; return; }
   if (command === 'issues') { console.log(read(projectFile(root, 'ISSUES.md'))); return; }
   if (command === 'handoffs') { console.log(read(projectFile(root, 'HANDOFFS.md'))); return; }
   if (command === 'status' || command === 'tasks') { const status = projectStatus(root); console.log(command === 'status' ? status.state : status.tasks); return; }
