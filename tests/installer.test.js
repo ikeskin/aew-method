@@ -4,7 +4,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import * as analysisModule from '../src/cli.js';
-import { classifyRisk, githubEvidence, verifyTrusted } from '../src/trust.js';
+import { classifyRisk, githubEvidence, verifyTrusted, check as localCheck } from '../src/trust.js';
 import { execFileSync } from 'node:child_process';
 const { discover, install, doctor } = analysisModule;
 
@@ -398,4 +398,28 @@ test('GitHub critical changes require current human review, not bot or author', 
   assert.equal(githubEvidence(root,sha,policy,stale).level,'CI_PASS');
   const author=(r,p)=>p.includes('/reviews?')?[[{id:3,state:'APPROVED',commit_id:sha,user:{type:'User',login:'commit-author'}}]]:api(r,p);
   assert.equal(githubEvidence(root,sha,policy,author).level,'CI_PASS');
+}));
+
+test('aew check uses a real subprocess interface and only clean commit yields LOCAL_PASS', () => sandbox(root => {
+  install(root);
+  writeFileSync(join(root,'package.json'),JSON.stringify({scripts:{test:'node --version'}}));
+  committed(root);
+  let invoked;
+  const result=localCheck(root,{execute:(cmd,args,options)=>{invoked={cmd,args,options};return {status:0};}});
+  assert.equal(result.result,'LOCAL_PASS');
+  assert.equal(invoked.cmd,'npm');
+  assert.deepEqual(invoked.args,['test']);
+  assert.equal(invoked.options.shell,false);
+  writeFileSync(join(root,'scratch.tmp'),'dirty');
+  const dirty=localCheck(root,{execute:()=>({status:0})});
+  assert.equal(dirty.result,'UNVERIFIED');
+}));
+test('GitHub unavailable fails closed rather than accepting self-authored QA', () => sandbox(root => {
+  install(root);
+  const task={schemaVersion:2,id:'AEW-001',status:'done',criteria:[{id:'AC-1',description:'Works'}],issues:[],qa:{verdict:'accepted'}};
+  writeFileSync(join(root,'.aew/gates.json'),JSON.stringify({schemaVersion:2,tasks:[task]}));
+  committed(root);
+  const result=verifyTrusted(root,{ci:true,github:()=>{throw new Error('GitHub unavailable');}});
+  assert.equal(result.ok,false);
+  assert.match(result.errors.join(' '),/GitHub unavailable/);
 }));
