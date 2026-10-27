@@ -4,7 +4,7 @@
 
 AEW Method is a lightweight, model-agnostic CLI that installs shared engineering instructions, project memory, task tracking, and evidence-oriented QA conventions for AI-assisted development. Designed with independent developers in mind.
 
-> **Beta (v0.5.8).** AEW is an instruction-based workflow, not an autonomous multi-agent runtime, security scanner, or test runner. AI-tool compliance depends on the host tool and context. `aew verify` executes AEW-selected tests directly and checks their real exit codes. GitHub, Azure DevOps, SVN, Git, CODEOWNERS and second-person approval are not required. Legacy v1 gate claims remain untrusted.
+> **Beta (v0.5.9).** AEW is an instruction-based workflow, not an autonomous multi-agent runtime, security scanner, or test runner. AI-tool compliance depends on the host tool and context. `aew verify` executes AEW-selected tests directly and checks their real exit codes. GitHub, Azure DevOps, SVN, Git, CODEOWNERS and second-person approval are not required. Legacy v1 gate claims remain untrusted.
 
 ## Requirements
 
@@ -24,7 +24,7 @@ aew doctor
 
 For an interactive setup, run `aew init` in a terminal. The installer preserves existing agent instructions and project files rather than overwriting them. New installations track checksums for managed templates; use `aew upgrade --dry-run` before updating. Legacy installations without a manifest require manual review and are never overwritten automatically.
 
-After initialization, open the project in your preferred AI coding tool and request a normal engineering task. The adapter entrypoint directs the agent to `.aew/SYSTEM.md`, the shared operating contract.
+After initialization, open the project in your preferred AI coding tool and request a normal engineering task. The short adapter entrypoint contains only universal rules; specialized instructions are loaded via role skills only when relevant.
 
 ## How it works
 
@@ -33,9 +33,9 @@ Codex / Claude Code / Gemini CLI
              |
    AGENTS.md / CLAUDE.md / GEMINI.md
              |
-       .aew/SYSTEM.md
+    on-demand AEW role skills
              |
-    project state + task criteria
+    relevant task-specific context
              |
    implementation + real verification
              |
@@ -55,7 +55,7 @@ AEW provides a set of conventions and files, not guaranteed agent orchestration.
 | `aew inspect` | Print detected project information |
 | `aew doctor [--json]` | Check installation file presence and basic configuration |
 | `aew status`, `aew tasks`, `aew handoffs`, `aew issues` | Display project records |
-| `aew check` | Execute detected project test command; record advisory local result under .git |
+| `aew check` | Execute supported project tests and report local evidence |
 | `aew verify [--json] [--task AEW-001]` | Execute and evaluate AEW's local verification policies; fail closed if tests cannot run |
 | `aew verify --ci` | Optional GitHub check-run integration where configured |
 | `aew config set config.workflow.mode light` | Select light, standard or strict workflow policy |
@@ -97,3 +97,9 @@ No remote account or version-control system is required. When Git or SVN is avai
 **Limitations:** AEW cannot prove that tests are complete or unmodified, and an agent with write access to source/tests may weaken them. Independent assurance requires an externally protected test definition; no local tool can guarantee that solely by inspecting agent-controlled files.
 
 Verification diagnostics: use `aew check --timeout-ms 600000` for longer-running suites (maximum 3600000 ms). Generated untracked files produce a warning and invalidate `cleanCommitEvidence`, but successful test execution can still return `LOCAL_PASS`. In optional GitHub CI mode, critical changed paths are printed as warnings; verification of a merged commit without an open PR reports risk as unknown rather than silently asserting normal risk. `REVIEWED` is reserved for a future independent-review integration and is not currently emitted.
+
+## Context budget (v0.5.9)
+
+New installations no longer create or require `.aew/SYSTEM.md`. All adapter entrypoints contain a short universal rule set; procedural QA, architecture, and deployment guidance lives in discoverable role skills. Light tasks do not require shared task records. Existing custom instructions are never overwritten on `init`; use `aew upgrade --dry-run` for checksum-managed templates. Older `.aew/SYSTEM.md` copies may be left in place after upgrading but are not referenced by freshly generated adapters.
+
+For real token-cost comparisons, see [Context benchmark](docs/context-benchmark.md). Static bootstrap size is a useful proxy, **not** proof of a token or monetary saving: instrument Claude with `--output-format stream-json` to measure usage and tool calls. Do not turn on mandatory Stop hooks in this release.
