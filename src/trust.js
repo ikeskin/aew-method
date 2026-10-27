@@ -77,7 +77,7 @@ function isDotnet(root) {
     if (depth > 12) return false;
     try {
       for (const entry of readdirSync(dir, {withFileTypes:true})) {
-        if (entry.isFile() && /\\.(?:slnx?|csproj)$/.test(entry.name)) return true;
+        if (entry.isFile() && /\.(?:slnx?|csproj)$/.test(entry.name)) return true;
         if (entry.isDirectory() && !excludedDirs.has(entry.name) && scan(join(dir,entry.name),depth+1)) return true;
       }
     } catch { /* unreadable paths cannot be inferred */ }
@@ -96,8 +96,8 @@ function availablePython() {
 }
 function trivialScript(script) {
   if (typeof script!=='string' || !script.trim()) return true;
-  return /(?:^|[;&|]\\s*)(?:echo\\b|true\\b|exit\\s+0\\b|:)(?:\\s|$)/i.test(script) ||
-    /(?:--passWithNoTests|--pass-with-no-tests|node\\s+-e\\s+['"]?(?:0|process\\.exit\\(0\\)))/i.test(script);
+  return /(?:^|[;&|]\s*)(?:echo\b|true\b|exit\s+0\b|:)(?:\s|$)/i.test(script) ||
+    /(?:--passWithNoTests|--pass-with-no-tests|node\s+-e\s+['"]?(?:0|process\.exit\(0\)))/i.test(script);
 }
 export function inferCheck(root) {
   const candidates=[];
