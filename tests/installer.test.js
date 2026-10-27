@@ -444,7 +444,7 @@ test('provider-neutral policy does not require a Git remote or any VCS', () => s
 test('agent cannot obtain LOCAL_PASS from a trivial npm test script', () => sandbox(root => {
   install(root);
   writeFileSync(join(root,'package.json'),JSON.stringify({scripts:{test:'echo ok'}}));
-  assert.throws(()=>localCheck(root,{execute:()=>({status:0})}),/trivial npm test script/);
+  assert.throws(()=>localCheck(root,{execute:()=>({status:0})}),/Trivial npm test script/i);
 }));
 test('AEW runs checks without trusting task self-approval', () => sandbox(root => {
   install(root);
