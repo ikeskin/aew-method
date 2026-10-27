@@ -20,7 +20,8 @@ Use `light` by default: for small tasks, change code, run relevant tests, and re
 - `VALIDATION.md`: actual build, test and security-check evidence.
 - `HANDOFFS.md`: Developer–QA handoff, findings and verdict.
 - `ISSUES.md`: unresolved bugs, risks and blockers.
-- `gates.json`: machine-readable acceptance status checked by `aew verify`.
+- `tasks/AEW-<ID>.json`: per-task acceptance records for tracked work; avoid shared-file merge conflicts.
+- `gates.json`: legacy machine-readable acceptance records; migrate using `aew migrate-tasks`, retaining the original file.
 
 ## Execution
 For nontrivial changes in standard or strict mode, identify or create a small task with observable acceptance criteria. Inspect relevant code/tests, choose only necessary roles, implement the smallest complete solution, verify it, and update records at meaningful task boundaries. Trivial changes require no elaborate planning. Never invent requirements, expand scope or refactor unrelated code.
