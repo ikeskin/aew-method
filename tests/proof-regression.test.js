@@ -32,7 +32,8 @@ function script(root,value) {
 test('uploaded proof: real test passes, bug and forged QA do not',()=>{
  const root=workspace();
  try {
-  assert.equal(verify(root).status,0);
+  const baseline=verify(root);
+  assert.equal(baseline.status,0,baseline.stdout+'\n'+baseline.stderr);
   writeFileSync(join(root,'sum.js'),'export const sum=(a,b)=>a-b;\n');commit(root,'bug');
   assert.notEqual(verify(root).status,0);
   const g={schemaVersion:2,tasks:[{id:'AEW-001',status:'done',criteria:[{id:'C1',description:'sum works',status:'passed',evidence:'self claim'}],issues:[],qa:{verdict:'accepted',evidence:'self'}}]};
