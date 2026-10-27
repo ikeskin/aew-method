@@ -43,7 +43,7 @@ function readPolicy(root) {
   const file = join(root, '.aew', 'trust-policy.json');
   if (!existsSync(file)) throw new Error('Missing trust policy: .aew/trust-policy.json (upgrade or init required)');
   const config = JSON.parse(readFileSync(file, 'utf8'));
-  if (config.schemaVersion !== 1 || typeof config.checkName !== 'string' || !config.checkName.trim())
+  if (config.schemaVersion !== 1 || !Array.isArray(config.checkNames) || config.checkNames.length === 0 || config.checkNames.some(x => typeof x !== 'string' || !x.trim()))
     throw new Error('Invalid trust policy');
   return config;
 }
@@ -51,7 +51,7 @@ function tasksIn(root) {
   const dir = join(root, '.aew', 'tasks');
   if (existsSync(dir)) {
     const names = readdirSync(dir).filter(name => /^AEW-\d+\.json$/.test(name));
-    if (names.length) return names.sort().map(name => JSON.parse(readFileSync(join(dir, name), 'utf8')));
+    if (names.length) return names.sort().map(name => {const task = JSON.parse(readFileSync(join(dir, name), 'utf8')); if (task.schemaVersion !== 2) throw new Error('Legacy task schema v1 is untrusted; migrate task records to v2'); return task;});
   }
   const legacy = JSON.parse(readFileSync(join(root, '.aew/gates.json'), 'utf8'));
   if (legacy.schemaVersion !== 2 || !Array.isArray(legacy.tasks))
@@ -62,7 +62,7 @@ function currentSha(root) { return git(root, 'rev-parse', 'HEAD'); }
 function clean(root) { return git(root, 'status', '--porcelain', '--untracked-files=all') === ''; }
 
 function localEvidence(root, sha) {
-  const file = join(root, '.aew', 'local-check.json');
+  const file = join(root, git(root, 'rev-parse', '--git-path', 'aew/local-check.json'));
   if (!existsSync(file)) return false;
   const evidence = JSON.parse(readFileSync(file, 'utf8'));
   return evidence.schemaVersion === 1 && evidence.result === 'LOCAL_PASS' &&
@@ -87,8 +87,8 @@ export function check(root, { execute = spawnSync } = {}) {
   const stillClean = clean(root);
   const result = run.status === 0 && !run.error && wasClean && stillClean ? 'LOCAL_PASS' : 'UNVERIFIED';
   const evidence = { schemaVersion:1, result, sha, clean:wasClean && stillClean, command:[command,...args], exitCode:run.status, generatedAt:new Date().toISOString(), advisoryOnly:true };
-  const path = join(root, '.aew', 'local-check.json');
-  mkdirSync(join(root, '.aew'), {recursive:true});
+  const path = join(root, git(root, 'rev-parse', '--git-path', 'aew/local-check.json'));
+  mkdirSync(join(path, '..'), {recursive:true});
   writeFileSync(path, JSON.stringify(evidence,null,2)+'\n');
   return evidence;
 }
@@ -102,8 +102,8 @@ function githubEvidence(root, sha, policy, api = gh) {
   if (!files.length || files.some(f => !f.filename)) throw new Error('Incomplete PR file list');
   const risk = classifyRisk(files.map(f => f.filename), policy.minimumRisk);
   const checks = flat(api(root, `repos/${repo}/commits/${sha}/check-runs?per_page=100`)).flatMap(x => x.check_runs || []);
-  const matches = checks.filter(run => run.name === policy.checkName && run.head_sha === sha && run.app?.slug === 'github-actions' && run.conclusion === 'success');
-  if (!matches.length) throw new Error('Trusted CI check not successful for HEAD');
+  const matches = checks.filter(run => policy.checkNames.includes(run.name) && run.head_sha === sha && run.app?.slug === 'github-actions' && run.conclusion === 'success');
+  if (!policy.checkNames.every(name => matches.some(check => check.name === name))) throw new Error('Trusted CI check not successful for HEAD');
   // A self-modified workflow requires a separate human approval, not just green CI.
   if (risk.risk === 'normal') return {level:'CI_PASS',risk,pr:pr.number};
   const reviews = flat(api(root, `repos/${repo}/pulls/${pr.number}/reviews?per_page=100`));
