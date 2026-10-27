@@ -237,7 +237,7 @@ test('empty verification fails rather than reporting a false PASS', () => sandbo
   const result = analysisModule.verify(root);
   assert.equal(result.ok, false);
   assert.deepEqual(result.tasks, []);
-  assert.match(result.errors.join(' '), /No tasks available/);
+  assert.match(result.errors.join(' '), /No supported test project/);
 }));
 
 test('nested .NET projects are detected without changing initial project type', () => sandbox(root => {
@@ -375,7 +375,7 @@ test('v2 agent-authored acceptance without trusted CI is blocked', () => sandbox
   const result=verifyTrusted(root);
   assert.equal(result.ok,false);
   assert.equal(result.level,'UNVERIFIED');
-  assert.match(result.errors.join(' '), /Independent CI verification not requested/);
+  assert.match(result.errors.join(' '), /No supported test project/);
 }));
 test('GitHub evidence rejects wrong-commit CI checks and untrusted applications', () => sandbox(root => {
   install(root); const sha=committed(root);
@@ -412,7 +412,9 @@ test('aew check uses a real subprocess interface and only clean commit yields LO
   assert.equal(invoked.options.shell,false);
   writeFileSync(join(root,'scratch.tmp'),'dirty');
   const dirty=localCheck(root,{execute:()=>({status:0})});
-  assert.equal(dirty.result,'UNVERIFIED');
+  assert.equal(dirty.result,'LOCAL_PASS');
+  assert.equal(dirty.vcs.clean,false);
+  assert.equal(dirty.advisoryOnly,true);
 }));
 test('GitHub unavailable fails closed rather than accepting self-authored QA', () => sandbox(root => {
   install(root);
@@ -421,5 +423,34 @@ test('GitHub unavailable fails closed rather than accepting self-authored QA', (
   committed(root);
   const result=verifyTrusted(root,{ci:true,github:()=>{throw new Error('GitHub unavailable');}});
   assert.equal(result.ok,false);
-  assert.match(result.errors.join(' '),/GitHub unavailable/);
+  assert.equal(result.ok,false);
+  assert.match(result.errors.join(' '),/No supported test project|GitHub CI provider/);
+}));
+
+test('provider-neutral policy does not require a Git remote or any VCS', () => sandbox(root => {
+  install(root);
+  writeFileSync(join(root,'package.json'),JSON.stringify({scripts:{test:'node --test'}}));
+  const commands=[];
+  const result=localCheck(root,{execute:(cmd,args)=>{commands.push([cmd,...args]);return {status:0};}});
+  assert.equal(result.result,'LOCAL_PASS');
+  assert.equal(result.vcs.type,'none');
+  assert.equal(result.vcs.revision,null);
+  assert.deepEqual(commands,[['npm','test']]);
+}));
+test('agent cannot obtain LOCAL_PASS from a trivial npm test script', () => sandbox(root => {
+  install(root);
+  writeFileSync(join(root,'package.json'),JSON.stringify({scripts:{test:'echo ok'}}));
+  assert.throws(()=>localCheck(root,{execute:()=>({status:0})}),/trivial npm test script/);
+}));
+test('AEW runs checks without trusting task self-approval', () => sandbox(root => {
+  install(root);
+  writeFileSync(join(root,'package.json'),JSON.stringify({scripts:{test:'node --test'}}));
+  const task={schemaVersion:2,id:'AEW-001',status:'done',criteria:[{id:'AC-1',description:'Works'}],issues:[],qa:{verdict:'accepted',evidence:'self-approved'}};
+  writeFileSync(join(root,'.aew/gates.json'),JSON.stringify({schemaVersion:2,tasks:[task]}));
+  const failed=verifyTrusted(root,{execute:()=>({status:1})});
+  assert.equal(failed.ok,false);
+  const passed=verifyTrusted(root,{execute:()=>({status:0})});
+  assert.equal(passed.ok,true);
+  assert.equal(passed.level,'LOCAL_PASS');
+  assert.equal(passed.independentApproval,false);
 }));
