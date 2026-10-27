@@ -198,7 +198,7 @@ test('verify blocks missing acceptance evidence and QA approval', () => sandbox(
   writeFileSync(join(root, '.aew/gates.json'), JSON.stringify({schemaVersion:1,tasks:[{id:'AEW-001',status:'done',criteria:[{id:'AC-1',description:'Works',status:'passed'}],issues:[],qa:{verdict:'accepted',evidence:'HANDOFFS.md'}}]}));
   const result = analysisModule.verify(root, 'AEW-001');
   assert.equal(result.ok, false);
-  assert.match(result.tasks[0].reasons.join(' '), /not verified/);
+  assert.match(result.errors.join(' '), /Legacy gates schema v1/);
 }));
 
 test('verify blocks open high security issue even if flagged nonblocking', () => sandbox(root => {
@@ -207,11 +207,11 @@ test('verify blocks open high security issue even if flagged nonblocking', () =>
   assert.equal(analysisModule.verify(root).ok, false);
 }));
 
-test('verify passes fully evidenced task and fails unresolved rework', () => sandbox(root => {
+test('verify rejects self-accepted legacy v1 tasks regardless of apparent QA success', () => sandbox(root => {
   install(root);
   const task = {id:'AEW-001',status:'done',criteria:[{id:'AC-1',description:'Works',status:'passed',evidence:'VALIDATION.md'}],issues:[{id:'ISSUE-1',severity:'medium',status:'resolved',evidence:'VALIDATION.md'}],qa:{verdict:'accepted',evidence:'HANDOFFS.md'}};
   writeFileSync(join(root, '.aew/gates.json'), JSON.stringify({schemaVersion:1,tasks:[task]}));
-  assert.equal(analysisModule.verify(root).ok, true);
+  assert.equal(analysisModule.verify(root).ok, false);
   task.status = 'rework';
   writeFileSync(join(root, '.aew/gates.json'), JSON.stringify({schemaVersion:1,tasks:[task]}));
   assert.equal(analysisModule.verify(root).ok, false);
@@ -267,14 +267,14 @@ test('project brief does not demand approval for every scaffold', () => sandbox(
   assert.doesNotMatch(brief, /without an approved plan/);
 }));
 
-test('v0.5.8 distinguishes recorded evidence from independent verification', () => sandbox(root => {
+test('v0.5.8 blocks recorded evidence from independent verification', () => sandbox(root => {
   install(root);
   const task = {id:'AEW-001',status:'done',criteria:[{id:'AC-1',description:'Works',status:'passed',evidence:'tests passed'}],issues:[],qa:{verdict:'accepted',evidence:'self-reported'}};
   writeFileSync(join(root, '.aew/gates.json'), JSON.stringify({schemaVersion:1,tasks:[task]}));
   const result = analysisModule.verify(root);
-  assert.equal(result.ok, true);
-  assert.equal(result.verification, 'recorded-only');
-  assert.equal(result.independentlyVerified, false);
+  assert.equal(result.ok, false);
+  assert.equal(result.level, 'UNVERIFIED');
+  assert.match(result.errors.join(' '), /Legacy gates schema v1/);
 }));
 
 test('v0.5.8 uses light workflow by default and validates workflow mode', () => sandbox(root => {
@@ -326,10 +326,10 @@ test('migrated task files override legacy shared gates without deleting them', (
   const result = analysisModule.migrateTasks(root);
   assert.equal(result.ok, true);
   assert.ok(existsSync(join(root, '.aew/tasks/AEW-001.json')));
-  assert.equal(analysisModule.verify(root).ok, true);
+  assert.equal(analysisModule.verify(root).ok, false);
   task.status = 'rework';
   writeFileSync(legacy, JSON.stringify({schemaVersion:1,tasks:[task]}));
-  assert.equal(analysisModule.verify(root).ok, true);
+  assert.equal(analysisModule.verify(root).ok, false);
 }));
 
 test('migration dry-run does not write task files', () => sandbox(root => {
