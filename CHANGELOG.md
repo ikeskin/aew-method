@@ -2,6 +2,9 @@
 
 ## 0.5.8 — Beta (in development)
 
+- Added checksum-based `aew upgrade` with dry-run and conflict preservation; legacy untracked files are never overwritten.
+- Added non-destructive `aew migrate-tasks` and per-task verification records.
+- Simplified adapter instructions and made role-skill triggers concrete.
 - Clarified verification trust: passing recorded gates is not independent QA or CI evidence.
 - Added light/standard/strict workflow mode configuration, defaulting to light.
 - Removed .NET-specific code-style defaults for non-.NET projects.
