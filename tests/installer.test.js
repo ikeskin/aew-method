@@ -69,8 +69,8 @@ test('installs routing, profiles and human-readable code standards', () => sandb
   for (const path of ['.aew/routing.md', '.aew/profiles/project/backend.md', '.aew/profiles/technology/.NET.md', '.aew/standards/readability.md', '.aew/standards/comments.md', '.aew/standards/engineering-scope.md']) {
     assert.ok(existsSync(join(root, path)), path);
   }
-  assert.match(readFileSync(join(root, 'AGENTS.md'), 'utf8'), /routing\.md/);
-  assert.match(readFileSync(join(root, 'CLAUDE.md'), 'utf8'), /routing\.md/);
+  assert.match(readFileSync(join(root, 'AGENTS.md'), 'utf8'), /only on demand/);
+  assert.match(readFileSync(join(root, 'CLAUDE.md'), 'utf8'), /only on demand/);
   assert.match(readFileSync(join(root, '.aew/project-brief.md'), 'utf8'), /profiles\/project\/backend\.md/);
   assert.match(readFileSync(join(root, '.aew/project-brief.md'), 'utf8'), /profiles\/technology\/\.NET\.md/);
 }));
@@ -125,8 +125,8 @@ test('v0.5.2 skills and adapters avoid eager full-context reads', () => sandbox(
   install(root, { adapters: ['codex', 'claude'] });
   const skill = readFileSync(join(root, '.agents/skills/aew-developer/SKILL.md'), 'utf8');
   const adapter = readFileSync(join(root, 'AGENTS.md'), 'utf8');
-  assert.match(skill, /do not preload/i);
-  assert.match(adapter, /Do not preload/i);
+  assert.match(skill, /Avoid loading unrelated guidance/i);
+  assert.match(adapter, /load relevant AEW skills only on demand/i);
   assert.ok(existsSync(join(root, '.aew/standards/token-efficiency.md')));
   assert.equal(doctor(root).ok, true);
 }));
@@ -142,7 +142,7 @@ test('critical missing dependencies trigger approval request rather than silent 
   assert.match(safety, /Pause only the blocked step/i);
   assert.match(safety, /apt download/);
   assert.match(routing, /await the answer/i);
-  assert.match(codex, /ask specific approval/i);
+  assert.match(codex, /Ask before installing tools/i);
   assert.match(claudeSkill, /approval question/i);
 }));
 
@@ -150,7 +150,7 @@ test('v0.5.3 creates persistent project state and code quality rules', () => san
   install(root, { adapters: ['codex', 'claude'], project: { technology: '.NET' } });
   for (const name of ['stack.json', 'STATE.md', 'TASKS.md', 'DECISIONS.md', 'VALIDATION.md', 'standards/code-organization.md']) assert.ok(existsSync(join(root, '.aew', name)), name);
   assert.equal(analysisModule.configShow(root).stack.technology, '.NET');
-  assert.match(readFileSync(join(root, 'AGENTS.md'), 'utf8'), /STATE.md/);
+  assert.match(readFileSync(join(root, 'AGENTS.md'), 'utf8'), /Light mode needs no task paperwork/);
   assert.match(readFileSync(join(root, '.aew/standards/code-organization.md'), 'utf8'), /composition root/);
   assert.equal(doctor(root).ok, true);
 }));
@@ -175,7 +175,7 @@ test('v0.5.4 installs evidence-based handoff and QA acceptance rules', () => san
   assert.match(handoff, /changes-requested/);
   assert.match(handoff, /verification-blocked/);
   assert.match(handoff, /Only after QA `accepted`/);
-  assert.match(developer, /HANDOFFS.md/);
+  assert.match(developer, /light mode, do not update shared status files/i);
   assert.match(qa, /only claim independent review/);
   assert.ok(existsSync(join(root, '.aew/HANDOFFS.md')));
   assert.equal(doctor(root).ok, true);
@@ -219,18 +219,18 @@ test('verify rejects self-accepted legacy v1 tasks regardless of apparent QA suc
   assert.equal(analysisModule.verify(root).ok, false);
 }));
 
-test('central SYSTEM.md is installed and referenced by adapter bootstrap', () => {
-  const root = mkdtempSync(join(tmpdir(), 'aew-system-'));
-  try {
-    install(root, { adapters: ['codex', 'claude', 'gemini'] });
-    const system = readFileSync(join(root, '.aew/SYSTEM.md'), 'utf8');
-    assert.match(system, /Engineering discipline without engineering bureaucracy/);
-    for (const marker of ['AGENTS.md', 'CLAUDE.md', 'GEMINI.md']) {
-      assert.match(readFileSync(join(root, marker), 'utf8'), /\.aew\/SYSTEM\.md/);
-    }
-    assert.equal(doctor(root).ok, true);
-  } finally { rmSync(root, { recursive: true, force: true }); }
-});
+test('v0.5.9 bootstraps all adapters without loading SYSTEM.md', () => sandbox(root => {
+  install(root, { adapters: ['codex', 'claude', 'gemini'] });
+  assert.equal(existsSync(join(root,'.aew/SYSTEM.md')),false);
+  for(const name of ['AGENTS.md','CLAUDE.md','GEMINI.md']) {
+    const content=readFileSync(join(root,name),'utf8');
+    assert.ok(content.split('\\n').length <= 9);
+    assert.ok(!content.includes('SYSTEM.md') && !content.includes('@.aew/'));
+  }
+  const skill=readFileSync(join(root,'.claude/skills/aew-qa/SKILL.md'),'utf8');
+  assert.match(skill,/independent QA/);
+  assert.equal(doctor(root).ok,true);
+}));
 
 test('empty verification fails rather than reporting a false PASS', () => sandbox(root => {
   install(root);
@@ -301,11 +301,11 @@ test('v0.5.8 preserves .NET style guidance when .NET is selected', () => sandbox
 
 test('upgrade updates pristine managed files and protects modified templates', () => sandbox(root => {
   install(root);
-  const managed = join(root, '.aew', 'SYSTEM.md');
+  const managed = join(root, '.aew', 'routing.md');
   writeFileSync(managed, 'custom rules');
   const dry = analysisModule.upgrade(root, { dryRun: true });
   assert.equal(dry.ok, false);
-  assert.ok(dry.results.some(x => x.relative === '.aew/SYSTEM.md' && x.action === 'conflict'));
+  assert.ok(dry.results.some(x => x.relative === '.aew/routing.md' && x.action === 'conflict'));
   assert.equal(readFileSync(managed, 'utf8'), 'custom rules');
   const run = analysisModule.upgrade(root);
   assert.equal(run.ok, false);
@@ -350,7 +350,7 @@ test('migration dry-run does not write task files', () => sandbox(root => {
 test('adapter skill descriptions contain concrete triggers', () => sandbox(root => {
   install(root, {adapters:['codex','claude','gemini']});
   const skill = readFileSync(join(root, '.claude/skills/aew-qa/SKILL.md'), 'utf8');
-  assert.match(skill, /Review acceptance evidence/);
+  assert.match(skill, /Check acceptance evidence/);
   assert.doesNotMatch(skill, /explicit \$aew-qa/);
   const gemini = readFileSync(join(root, 'GEMINI.md'), 'utf8');
   assert.match(gemini, /Gemini CLI/);
