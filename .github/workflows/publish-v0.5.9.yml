@@ -1,0 +1,75 @@
+name: Publish AEW v0.5.9
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/publish-v0.5.9.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  release:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Verify package version
+        run: |
+          test "$(node -p "require('./package.json').version")" = "0.5.9"
+          test "$(node -p "require('./package.json').name")" = "aew-method"
+      - name: Test package
+        run: |
+          npm ci
+          npm test
+      - name: Pack release archive
+        run: |
+          mkdir -p dist
+          npm pack --pack-destination dist
+          test -s dist/aew-method-0.5.9.tgz
+          cd dist
+          sha256sum aew-method-0.5.9.tgz > SHA256SUMS.txt
+      - name: Create release with archive
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view v0.5.9 >/dev/null 2>&1; then
+            echo "Release v0.5.9 already exists; refusing to overwrite it."
+            exit 1
+          fi
+          gh release create v0.5.9 dist/aew-method-0.5.9.tgz dist/SHA256SUMS.txt \
+            --target "$GITHUB_SHA" \
+            --title "AEW Method v0.5.9" \
+            --notes "Context-optimized adapter instructions and on-demand role skills, plus local verification and a stream-json benchmark tool. This release does not assert a measured token-cost saving."
+
+  github-packages:
+    needs: release
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          registry-url: 'https://npm.pkg.github.com'
+          scope: '@ikeskin'
+      - name: Install dependencies
+        run: npm ci
+      - name: Prepare GitHub npm package identity
+        run: |
+          npm pkg set name="@ikeskin/aew-method"
+          npm pkg set repository.type=git
+          npm pkg set repository.url="git+https://github.com/ikeskin/aew-method.git"
+          test "$(node -p "require('./package.json').name")" = "@ikeskin/aew-method"
+      - name: Publish to GitHub Packages
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npm publish --registry=https://npm.pkg.github.com --access public --ignore-scripts
