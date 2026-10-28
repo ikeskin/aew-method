@@ -6,6 +6,17 @@ AEW Method is a lightweight, model-agnostic CLI that installs shared engineering
 
 > **Beta (v0.5.9).** AEW is an instruction-based workflow, not an autonomous multi-agent runtime, security scanner, or test runner. AI-tool compliance depends on the host tool and context. `aew verify` executes AEW-selected tests directly and checks their real exit codes. GitHub, Azure DevOps, SVN, Git, CODEOWNERS and second-person approval are not required. Legacy v1 gate claims remain untrusted.
 
+## GitHub release package
+
+Version 0.5.9 is distributed as an npm-compatible archive attached to the [GitHub Releases page](https://github.com/ikeskin/aew-method/releases). Once the release workflow succeeds, install the public archive directly:
+
+```bash
+npm install -g https://github.com/ikeskin/aew-method/releases/download/v0.5.9/aew-method-0.5.9.tgz
+aew --help
+```
+
+A scoped npm package is also published to **GitHub Packages** as `@ikeskin/aew-method@0.5.9`. GitHub's npm registry may require a token with `read:packages`, even for public packages. For a simple setup with no registry authentication, prefer the GitHub Release archive above.
+
 ## Requirements
 
 Node.js 20 or newer. Use Codex CLI, Claude Code, or Gemini CLI separately; AEW does not install or operate those tools.
